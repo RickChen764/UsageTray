@@ -45,6 +45,11 @@ internal static class UpdateInstaller
         catch (Exception ex)
         {
             WriteLog("安装更新失败", ex);
+            if (args.Length > 1 && File.Exists(args[1]))
+            {
+                TryStart(args[1]);
+            }
+
             MessageBox.Show($"安装更新失败，旧版本未被删除。\n\n{ex.Message}",
                 "UsageTray 更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }

@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -116,6 +117,14 @@ internal sealed class UpdateService : IDisposable
             if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new UpdateException("更新包 SHA-256 校验失败，已取消安装。");
+            }
+
+            var fileVersion = FileVersionInfo.GetVersionInfo(partialPath).FileVersion;
+            if (!TryParseVersion(fileVersion ?? string.Empty, out var executableVersion) ||
+                executableVersion != release.Version)
+            {
+                throw new UpdateException(
+                    $"更新包版本与 Release 不一致（文件 {fileVersion ?? "未知"}，Release {release.Tag}）。");
             }
 
             File.Move(partialPath, executablePath, overwrite: true);
