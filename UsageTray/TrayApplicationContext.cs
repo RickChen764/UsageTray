@@ -25,6 +25,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private AppSettings _settings;
     private bool _refreshing;
     private bool _checkingUpdate;
+    private bool _showingUpdatePrompt;
     private bool _installingUpdate;
     private string? _lastError;
     private UpdateRelease? _availableUpdate;
@@ -260,35 +261,51 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task UpdateMenuItem_ClickAsync()
     {
+        if (_showingUpdatePrompt || _installingUpdate)
+        {
+            return;
+        }
+
         if (_availableUpdate is null)
         {
             await CheckForUpdatesAsync(notifyWhenCurrent: true);
             return;
         }
 
-        var release = _availableUpdate;
-        var notes = string.IsNullOrWhiteSpace(release.Notes)
-            ? "该版本未提供更新说明。"
-            : release.Notes.Trim();
-        if (notes.Length > 900)
+        _showingUpdatePrompt = true;
+        _updateItem.Enabled = false;
+        try
         {
-            notes = notes[..900] + "…";
-        }
+            var release = _availableUpdate;
+            var notes = string.IsNullOrWhiteSpace(release.Notes)
+                ? "该版本未提供更新说明。"
+                : release.Notes.Trim();
+            if (notes.Length > 900)
+            {
+                notes = notes[..900] + "…";
+            }
 
-        var size = release.ExecutableSize is > 0
-            ? $"\n下载大小：{FormatFileSize(release.ExecutableSize.Value)}"
-            : string.Empty;
-        var choice = MessageBox.Show(
-            $"发现新版本 v{release.Version.ToString(3)}。{size}\n\n{notes}\n\n" +
-            "下载完成后，UsageTray 会自动重启。是否立即更新？",
-            "UsageTray 更新", MessageBoxButtons.YesNo, MessageBoxIcon.Information,
-            MessageBoxDefaultButton.Button1);
-        if (choice != DialogResult.Yes)
+            var size = release.ExecutableSize is > 0
+                ? $"\n下载大小：{FormatFileSize(release.ExecutableSize.Value)}"
+                : string.Empty;
+            var choice = MessageBox.Show(
+                $"发现新版本 v{release.Version.ToString(3)}。{size}\n\n{notes}\n\n" +
+                "下载完成后，UsageTray 会自动重启。是否立即更新？",
+                "UsageTray 更新", MessageBoxButtons.YesNo, MessageBoxIcon.Information,
+                MessageBoxDefaultButton.Button1);
+            if (choice == DialogResult.Yes)
+            {
+                await InstallUpdateAsync(release);
+            }
+        }
+        finally
         {
-            return;
+            _showingUpdatePrompt = false;
+            if (!_installingUpdate)
+            {
+                _updateItem.Enabled = true;
+            }
         }
-
-        await InstallUpdateAsync(release);
     }
 
     private async Task InstallUpdateAsync(UpdateRelease release)

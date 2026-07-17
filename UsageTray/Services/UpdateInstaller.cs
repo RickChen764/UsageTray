@@ -132,7 +132,6 @@ internal static class UpdateInstaller
             if (targetMoved && File.Exists(backupPath))
             {
                 File.Move(backupPath, targetPath, overwrite: true);
-                TryStart(targetPath);
             }
 
             throw;
