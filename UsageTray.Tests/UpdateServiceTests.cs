@@ -147,8 +147,8 @@ public sealed class UpdateServiceTests
         using var service = new UpdateService(handler);
         var stages = new List<UpdateProgress>();
         var release = new UpdateRelease(
-            new Version(1, 1, 7),
-            "v1.1.7-test-progress",
+            new Version(1, 1, 8),
+            "v1.1.8-test-progress",
             "UsageTray test",
             string.Empty,
             new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.7"),

@@ -26,6 +26,9 @@ internal sealed class TaskbarToolbarForm : Form
     private Rectangle _lastTaskbarBounds;
     private Rectangle _lastTrayBounds;
     private string _displayText = "等待配置";
+    private HoverCardContent _hoverContent = HoverCardContent.CreateStatus(
+        "等待配置", "请先完成 API 地址与密钥设置。",
+        Color.FromArgb(124, 132, 145));
     private Color _statusColor = Color.FromArgb(124, 132, 145);
     private int _desiredToolbarWidth = MinimumToolbarWidth;
     private bool _hovered;
@@ -52,6 +55,9 @@ internal sealed class TaskbarToolbarForm : Form
         _toolTip.InitialDelay = 300;
         _toolTip.ReshowDelay = 100;
         _toolTip.ShowAlways = true;
+        _toolTip.OwnerDraw = true;
+        _toolTip.Popup += ToolTip_Popup;
+        _toolTip.Draw += ToolTip_Draw;
         _toolTip.SetToolTip(this, "UsageTray");
 
         _attachmentTimer.Tick += (_, _) => AttachOrReposition();
@@ -76,14 +82,35 @@ internal sealed class TaskbarToolbarForm : Form
         _attachmentTimer.Start();
     }
 
-    public void SetDisplay(string text, string tooltip, Color statusColor)
+    public void SetDisplay(
+        string text,
+        HoverCardContent hoverContent,
+        Color statusColor)
     {
         _displayText = text;
+        _hoverContent = hoverContent;
         _statusColor = statusColor;
-        _toolTip.SetToolTip(this, tooltip);
+        _toolTip.SetToolTip(this, hoverContent.ToPlainText());
         UpdateDesiredToolbarWidth();
         AttachOrReposition(force: true);
         Invalidate();
+    }
+
+    private void ToolTip_Popup(object? sender, PopupEventArgs e)
+    {
+        var dpi = e.AssociatedControl?.DeviceDpi ?? DeviceDpi;
+        var desired = UsageHoverCardRenderer.Measure(_hoverContent, dpi);
+        var workingArea = Screen.FromControl(e.AssociatedControl ?? this).WorkingArea;
+        var margin = Math.Max(8, (int)Math.Round(10 * dpi / 96F));
+        e.ToolTipSize = new Size(
+            Math.Min(desired.Width, Math.Max(240, workingArea.Width - margin * 2)),
+            Math.Min(desired.Height, Math.Max(120, workingArea.Height - margin * 2)));
+    }
+
+    private void ToolTip_Draw(object? sender, DrawToolTipEventArgs e)
+    {
+        var dpi = e.AssociatedControl?.DeviceDpi ?? DeviceDpi;
+        UsageHoverCardRenderer.Draw(e.Graphics, e.Bounds, dpi, _hoverContent);
     }
 
     public void AttachOrReposition(bool force = false)
@@ -300,6 +327,8 @@ internal sealed class TaskbarToolbarForm : Form
         {
             _attachmentTimer.Stop();
             _attachmentTimer.Dispose();
+            _toolTip.Popup -= ToolTip_Popup;
+            _toolTip.Draw -= ToolTip_Draw;
             _toolTip.Dispose();
         }
 

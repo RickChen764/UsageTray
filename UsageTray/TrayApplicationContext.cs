@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using UsageTray.Models;
 using UsageTray.Services;
 
@@ -70,7 +69,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _toolbar.RefreshRequested += async (_, _) => await RefreshUsageAsync(showSuccessNotification: false);
         _toolbar.SettingsRequested += (_, _) => ShowSettings();
         _toolbar.AttachmentChanged += (_, attached) => _notifyIcon.Visible = !attached;
-        _toolbar.SetDisplay("等待配置", "UsageTray - 等待配置", Color.FromArgb(124, 132, 145));
+        _toolbar.SetDisplay("等待配置",
+            HoverCardContent.CreateStatus(
+                "等待配置", "请先完成 API 地址与密钥设置。",
+                Color.FromArgb(124, 132, 145)),
+            Color.FromArgb(124, 132, 145));
         _toolbar.Show();
         _notifyIcon.Visible = !_toolbar.IsAttached;
 
@@ -104,7 +107,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _refreshItem.Enabled = false;
         try
         {
-            _toolbar.SetDisplay("刷新中…", "UsageTray - 正在读取用量", Color.FromArgb(69, 139, 226));
+            _toolbar.SetDisplay("刷新中…",
+                HoverCardContent.CreateStatus(
+                    "刷新中…", "正在从服务端读取最新用量。",
+                    Color.FromArgb(69, 139, 226)),
+                Color.FromArgb(69, 139, 226));
             UpdateIcon(null, TrayIconState.Loading);
             var usage = await _apiClient.GetUsageAsync(_settings.BaseUrl, _settings.GetApiKey());
             ApplyUsage(usage);
@@ -148,7 +155,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 : usage.Total is > 0 && usage.Remaining / usage.Total.Value <= 0.25m
                     ? Color.FromArgb(240, 161, 69)
                     : Color.FromArgb(67, 190, 112);
-        _toolbar.SetDisplay(display, BuildHoverText(usage, details, validity),
+        _toolbar.SetDisplay(display, BuildHoverContent(usage, details, validity, statusColor),
             statusColor);
         SetTooltip($"UsageTray - {details}{validity}");
         UpdateIcon(usage.Remaining, usage.IsValid ? TrayIconState.Healthy : TrayIconState.Invalid);
@@ -161,7 +168,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _todayTokensItem.Text = "今日 Token：--";
         _updatedItem.Text = $"最后尝试：{DateTime.Now:yyyy-MM-dd HH:mm:ss}";
         SetTooltip("UsageTray - 读取失败");
-        _toolbar.SetDisplay("读取失败", $"UsageTray\n{message}\n\n左键重试 · 双击设置 · 右键菜单",
+        _toolbar.SetDisplay("读取失败",
+            HoverCardContent.CreateStatus(
+                "读取失败", message, Color.FromArgb(235, 83, 83),
+                $"最后尝试 {DateTime.Now:HH:mm:ss}"),
             Color.FromArgb(235, 83, 83));
         UpdateIcon(null, TrayIconState.Error);
 
@@ -384,79 +394,63 @@ internal sealed class TrayApplicationContext : ApplicationContext
             : "今日 Token：--";
     }
 
-    private static string BuildHoverText(UsageResult usage, string balanceDetails, string validity)
+    private static HoverCardContent BuildHoverContent(
+        UsageResult usage,
+        string balanceDetails,
+        string validity,
+        Color statusColor)
     {
-        var builder = new StringBuilder();
-        var header = string.IsNullOrWhiteSpace(usage.PlanName)
-            ? "UsageTray"
-            : $"UsageTray · {usage.PlanName}";
-        builder.AppendLine(header);
-        builder.AppendLine($"{balanceDetails}{validity}");
-        if (!string.IsNullOrWhiteSpace(usage.Mode))
-        {
-            builder.AppendLine($"计费模式：{usage.Mode}");
-        }
-
+        var todayMetrics = new List<HoverCardMetric>();
+        var tokenMetrics = new List<HoverCardMetric>();
+        var performanceMetrics = new List<HoverCardMetric>();
+        var allTimeMetrics = new List<HoverCardMetric>();
+        var modelRows = new List<HoverCardModelRow>();
         var statistics = usage.Statistics;
         if (statistics?.Today is { } today)
         {
-            builder.AppendLine();
-            builder.AppendLine("今日累计（服务端口径）");
             var cost = today.ActualCost ?? today.Cost;
-            var costText = cost is null ? "--" : FormatCompactAmount(cost.Value, usage.Unit);
-            var requestText = today.Requests is null ? "--" : today.Requests.Value.ToString("N0");
-            builder.AppendLine($"费用 {costText}  ·  请求 {requestText} 次");
-            if (today.TotalTokens is not null)
-            {
-                builder.AppendLine($"Token {today.TotalTokens.Value:N0}（{FormatCompactCount(today.TotalTokens.Value)}）");
-            }
+            todayMetrics.Add(new HoverCardMetric("费用",
+                cost is null ? "--" : FormatCompactAmount(cost.Value, usage.Unit), true));
+            todayMetrics.Add(new HoverCardMetric("请求",
+                today.Requests is null ? "--" : today.Requests.Value.ToString("N0")));
+            todayMetrics.Add(new HoverCardMetric("Token",
+                today.TotalTokens is null ? "--" : FormatCompactCount(today.TotalTokens.Value)));
 
-            var tokenParts = new List<string>();
-            AddTokenPart(tokenParts, "输入", today.InputTokens);
-            AddTokenPart(tokenParts, "输出", today.OutputTokens);
-            AddTokenPart(tokenParts, "缓存读取", today.CacheReadTokens);
-            AddTokenPart(tokenParts, "缓存写入", today.CacheCreationTokens);
-            if (tokenParts.Count > 0)
-            {
-                builder.AppendLine(string.Join("  ·  ", tokenParts));
-            }
+            AddHoverMetric(tokenMetrics, "输入", today.InputTokens);
+            AddHoverMetric(tokenMetrics, "输出", today.OutputTokens);
+            AddHoverMetric(tokenMetrics, "缓存读取", today.CacheReadTokens);
+            AddHoverMetric(tokenMetrics, "缓存写入", today.CacheCreationTokens);
         }
 
         if (statistics is not null)
         {
-            var rateParts = new List<string>();
             if (statistics.TokensPerMinute is not null)
             {
-                rateParts.Add($"TPM {FormatCompactDecimal(statistics.TokensPerMinute.Value)}");
+                performanceMetrics.Add(new HoverCardMetric("TPM",
+                    FormatCompactDecimal(statistics.TokensPerMinute.Value)));
             }
 
             if (statistics.RequestsPerMinute is not null)
             {
-                rateParts.Add($"RPM {statistics.RequestsPerMinute.Value:0.##}");
+                performanceMetrics.Add(new HoverCardMetric("RPM",
+                    statistics.RequestsPerMinute.Value.ToString("0.##")));
             }
 
             if (statistics.AverageDurationMs is not null)
             {
-                rateParts.Add($"平均响应 {FormatDuration(statistics.AverageDurationMs.Value)}");
-            }
-
-            if (rateParts.Count > 0)
-            {
-                builder.AppendLine(string.Join("  ·  ", rateParts));
+                performanceMetrics.Add(new HoverCardMetric("平均响应",
+                    FormatDuration(statistics.AverageDurationMs.Value)));
             }
 
             if (statistics.AllTime is { } allTime)
             {
-                builder.AppendLine();
                 var allTimeCost = allTime.ActualCost ?? allTime.Cost;
-                var allTimeCostText = allTimeCost is null
-                    ? "--"
-                    : FormatCompactAmount(allTimeCost.Value, usage.Unit);
-                var allTimeRequests = allTime.Requests is null ? "--" : allTime.Requests.Value.ToString("N0");
-                var allTimeTokens = allTime.TotalTokens is null
-                    ? "--"
-                    : FormatCompactCount(allTime.TotalTokens.Value);
-                builder.AppendLine($"累计：{allTimeCostText}  ·  {allTimeRequests} 次请求  ·  {allTimeTokens} Token");
+                allTimeMetrics.Add(new HoverCardMetric("费用",
+                    allTimeCost is null ? "--" : FormatCompactAmount(allTimeCost.Value, usage.Unit)));
+                allTimeMetrics.Add(new HoverCardMetric("请求",
+                    allTime.Requests is null ? "--" : allTime.Requests.Value.ToString("N0")));
+                allTimeMetrics.Add(new HoverCardMetric("Token",
+                    allTime.TotalTokens is null ? "--" : FormatCompactCount(allTime.TotalTokens.Value)));
             }
 
             var models = statistics.Models
@@ -466,27 +460,49 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 .ToArray();
             if (models.Length > 0)
             {
-                builder.AppendLine("模型累计（Top 3）");
                 foreach (var model in models)
                 {
                     var tokens = model.TotalTokens is null ? "--" : FormatCompactCount(model.TotalTokens.Value);
                     var cost = model.Cost is null ? "--" : FormatCompactAmount(model.Cost.Value, usage.Unit);
-                    builder.AppendLine($"{model.Model}：{tokens} Token  ·  {cost}");
+                    modelRows.Add(new HoverCardModelRow(model.Model, tokens, cost));
                 }
             }
         }
 
-        builder.AppendLine();
-        builder.AppendLine($"最后更新：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        builder.Append("左键刷新 · 双击设置 · 右键菜单");
-        return builder.ToString();
+        var primaryCaption = usage.Total is > 0
+            ? $"剩余比例 {usage.Remaining / usage.Total.Value:P1} · 总额度 {FormatAmount(usage.Total.Value)} {usage.Unit}"
+            : balanceDetails;
+        var badge = !string.IsNullOrWhiteSpace(usage.Mode)
+            ? $"计费 · {usage.Mode.Trim()}"
+            : !string.IsNullOrWhiteSpace(usage.PlanName) &&
+              !string.Equals(usage.PlanName.Trim(), "钱包余额", StringComparison.OrdinalIgnoreCase)
+                ? usage.PlanName.Trim()
+                : null;
+
+        return new HoverCardContent(
+            "UsageTray",
+            usage.IsValid ? "钱包余额" : "钱包余额（已停用）",
+            $"{FormatAmount(usage.Remaining)} {usage.Unit}{validity}",
+            primaryCaption,
+            badge,
+            statusColor,
+            todayMetrics,
+            tokenMetrics,
+            performanceMetrics,
+            allTimeMetrics,
+            modelRows,
+            $"更新于 {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+            "左键刷新 · 双击设置 · 右键菜单");
     }
 
-    private static void AddTokenPart(List<string> parts, string name, long? value)
+    private static void AddHoverMetric(
+        List<HoverCardMetric> metrics,
+        string label,
+        long? value)
     {
         if (value is not null)
         {
-            parts.Add($"{name} {FormatCompactCount(value.Value)}");
+            metrics.Add(new HoverCardMetric(label, FormatCompactCount(value.Value)));
         }
     }
 
