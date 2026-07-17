@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Verify tag matches project version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content .\UsageTray\UsageTray.csproj
+          $version = $project.Project.PropertyGroup.Version
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match project version v$version"
+          }
+
+      - name: Test
+        run: dotnet test .\UsageTray.Tests\UsageTray.Tests.csproj -c Release
+
+      - name: Publish
+        run: >-
+          dotnet publish .\UsageTray\UsageTray.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=None -p:DebugSymbols=false
+          -o .\publish
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          Move-Item .\publish\UsageTray.exe .\UsageTray-win-x64.exe
+          $hash = (Get-FileHash .\UsageTray-win-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  UsageTray-win-x64.exe" | Set-Content -Encoding ascii -NoNewline .\UsageTray-win-x64.exe.sha256
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          .\UsageTray-win-x64.exe
+          .\UsageTray-win-x64.exe.sha256
+          --title "UsageTray ${{ github.ref_name }}"
+          --generate-notes
