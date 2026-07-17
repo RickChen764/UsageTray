@@ -20,7 +20,8 @@ internal sealed class UpdateService : IDisposable
     public UpdateService(HttpMessageHandler? handler = null)
     {
         _httpClient = handler is null ? new HttpClient() : new HttpClient(handler);
-        _httpClient.Timeout = TimeSpan.FromSeconds(45);
+        // GitHub Release 的自包含单文件约 70 MB；慢速或跨境网络需要更宽裕的总下载时间。
+        _httpClient.Timeout = TimeSpan.FromMinutes(10);
         _httpClient.DefaultRequestHeaders.UserAgent.Add(
             new ProductInfoHeaderValue("UsageTray", CurrentVersion.ToString(3)));
         _httpClient.DefaultRequestHeaders.Accept.Add(
