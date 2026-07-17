@@ -1,3 +1,6 @@
+using System.Net;
+using System.Security.Cryptography;
+using UsageTray.Models;
 using UsageTray.Services;
 using Xunit;
 
@@ -119,6 +122,52 @@ public sealed class UpdateServiceTests
             UpdateService.ParseTagFromReleasePage(new Uri(url)));
     }
 
+    [Fact]
+    public async Task DownloadAndVerifyAsync_ReportsDownloadStagesAndPercentage()
+    {
+        var executable = await File.ReadAllBytesAsync(
+            typeof(UpdateServiceTests).Assembly.Location.Replace(
+                "UsageTray.Tests.dll", "UsageTray.exe", StringComparison.Ordinal));
+        var hash = Convert.ToHexString(SHA256.HashData(executable));
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith(".sha256",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"{hash}  {UpdateService.ExecutableAssetName}")
+                };
+            }
+
+            var content = new ByteArrayContent(executable);
+            content.Headers.ContentLength = executable.Length;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
+        using var service = new UpdateService(handler);
+        var stages = new List<UpdateProgress>();
+        var release = new UpdateRelease(
+            new Version(1, 1, 7),
+            "v1.1.7-test-progress",
+            "UsageTray test",
+            string.Empty,
+            new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.7"),
+            new Uri("https://github.com/RickChen764/UsageTray/releases/download/v1.1.7/UsageTray-win-x64.exe"),
+            new Uri("https://github.com/RickChen764/UsageTray/releases/download/v1.1.7/UsageTray-win-x64.exe.sha256"),
+            executable.Length);
+
+        var downloaded = await service.DownloadAndVerifyAsync(
+            release, new InlineProgress<UpdateProgress>(stages.Add));
+
+        Assert.Equal(UpdateProgressStage.Preparing, stages[0].Stage);
+        Assert.Contains(stages, value =>
+            value.Stage == UpdateProgressStage.Downloading && value.Percentage == 0);
+        Assert.Contains(stages, value =>
+            value.Stage == UpdateProgressStage.Downloading && value.Percentage == 100);
+        Assert.Equal(UpdateProgressStage.Verifying, stages[^1].Stage);
+        Assert.True(File.Exists(downloaded.ExecutablePath));
+    }
+
     private const string ValidReleaseJson = """
         {
           "tag_name": "v1.2.0",
@@ -139,4 +188,22 @@ public sealed class UpdateServiceTests
           ]
         }
         """;
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    private sealed class StubHttpMessageHandler(
+        Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var response = responseFactory(request);
+            response.RequestMessage = request;
+            return Task.FromResult(response);
+        }
+    }
 }

@@ -12,6 +12,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly UpdateService _updateService = new();
     private readonly NotifyIcon _notifyIcon;
     private readonly TaskbarToolbarForm _toolbar;
+    private readonly ContextMenuStrip _menu;
+    private readonly ContextMenuDismissController _menuDismissController;
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
     private readonly System.Windows.Forms.Timer _updateTimer = new();
     private readonly ToolStripMenuItem _statusItem = new("余额：尚未读取") { Enabled = false };
@@ -33,19 +35,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _settings = _settingsStore.Load(out var warning);
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(_statusItem);
-        menu.Items.Add(_todayCostItem);
-        menu.Items.Add(_todayTokensItem);
-        menu.Items.Add(_updatedItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_refreshItem);
-        menu.Items.Add("设置…", null, (_, _) => ShowSettings());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_versionItem);
-        menu.Items.Add(_updateItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("退出", null, (_, _) => ExitThread());
+        _menu = new ContextMenuStrip();
+        _menu.Items.Add(_statusItem);
+        _menu.Items.Add(_todayCostItem);
+        _menu.Items.Add(_todayTokensItem);
+        _menu.Items.Add(_updatedItem);
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(_refreshItem);
+        _menu.Items.Add("设置…", null, (_, _) => ShowSettings());
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(_versionItem);
+        _menu.Items.Add(_updateItem);
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add("退出", null, (_, _) => ExitThread());
+        _menuDismissController = new ContextMenuDismissController(_menu);
 
         _refreshItem.Click += async (_, _) => await RefreshUsageAsync(showSuccessNotification: true);
         _refreshTimer.Tick += async (_, _) => await RefreshUsageAsync(showSuccessNotification: false);
@@ -57,13 +60,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Visible = false,
-            ContextMenuStrip = menu,
+            ContextMenuStrip = _menu,
             Text = "UsageTray - 等待配置"
         };
         _notifyIcon.DoubleClick += (_, _) => ShowSettings();
         UpdateIcon(null, TrayIconState.Loading);
 
-        _toolbar = new TaskbarToolbarForm(menu);
+        _toolbar = new TaskbarToolbarForm(_menu);
         _toolbar.RefreshRequested += async (_, _) => await RefreshUsageAsync(showSuccessNotification: false);
         _toolbar.SettingsRequested += (_, _) => ShowSettings();
         _toolbar.AttachmentChanged += (_, attached) => _notifyIcon.Visible = !attached;
@@ -217,7 +220,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _checkingUpdate = true;
         _updateItem.Enabled = false;
-        _updateItem.Text = "正在检查更新…";
+        SetUpdateBusyState("更新中：正在检查…");
         try
         {
             var release = await _updateService.CheckAsync();
@@ -298,14 +301,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private async Task InstallUpdateAsync(UpdateRelease release)
     {
         _installingUpdate = true;
-        _updateItem.Enabled = false;
-        _updateItem.Text = "正在下载更新…";
+        SetUpdateBusyState("更新中：准备下载…");
         try
         {
-            var progress = new Progress<int>(value =>
-                _updateItem.Text = $"正在下载更新… {value}%");
+            var progress = new Progress<UpdateProgress>(value =>
+                SetUpdateBusyState(FormatUpdateProgress(value)));
             var downloaded = await _updateService.DownloadAndVerifyAsync(release, progress);
-            _updateItem.Text = "正在安装并重启…";
+            SetUpdateBusyState("更新中：正在安装并重启…");
             UpdateInstaller.Launch(downloaded.ExecutablePath, downloaded.Sha256);
             ExitThread();
         }
@@ -318,6 +320,22 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 "UsageTray 更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    private void SetUpdateBusyState(string text)
+    {
+        _updateItem.Text = text;
+        _updateItem.Enabled = false;
+    }
+
+    private static string FormatUpdateProgress(UpdateProgress progress) => progress.Stage switch
+    {
+        UpdateProgressStage.Preparing => "更新中：准备下载…",
+        UpdateProgressStage.Downloading when progress.Percentage is not null =>
+            $"更新中：下载 {progress.Percentage.Value}%",
+        UpdateProgressStage.Downloading => "更新中：正在下载…",
+        UpdateProgressStage.Verifying => "更新中：正在校验…",
+        _ => "更新中…"
+    };
 
     private void UpdateIcon(decimal? remaining, TrayIconState state)
     {
@@ -514,6 +532,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _updateTimer.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _menuDismissController.Dispose();
+        _menu.Dispose();
         _currentIcon?.Dispose();
         _toolbar.Close();
         _toolbar.Dispose();

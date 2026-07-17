@@ -105,7 +105,7 @@ internal sealed class UpdateService : IDisposable
 
     public async Task<DownloadedUpdate> DownloadAndVerifyAsync(
         UpdateRelease release,
-        IProgress<int>? progress = null,
+        IProgress<UpdateProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ValidateDownloadUri(release.ExecutableUrl);
@@ -120,6 +120,7 @@ internal sealed class UpdateService : IDisposable
 
         var executablePath = Path.Combine(versionDirectory, ExecutableAssetName);
         var partialPath = executablePath + ".download";
+        progress?.Report(new UpdateProgress(UpdateProgressStage.Preparing));
         var expectedHash = await DownloadChecksumAsync(release.ChecksumUrl, cancellationToken);
 
         try
@@ -127,7 +128,7 @@ internal sealed class UpdateService : IDisposable
             using var response = await _httpClient.GetAsync(
                 release.ExecutableUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var length = response.Content.Headers.ContentLength;
+            var length = response.Content.Headers.ContentLength ?? release.ExecutableSize;
             if (length is > MaximumExecutableBytes)
             {
                 throw new UpdateException("更新包超过允许的最大尺寸。");
@@ -138,6 +139,9 @@ internal sealed class UpdateService : IDisposable
                 partialPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
             var buffer = new byte[81920];
             long received = 0;
+            var lastPercentage = -1;
+            progress?.Report(new UpdateProgress(UpdateProgressStage.Downloading,
+                length is > 0 ? 0 : null));
             int read;
             while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
             {
@@ -150,13 +154,20 @@ internal sealed class UpdateService : IDisposable
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 if (length is > 0)
                 {
-                    progress?.Report((int)Math.Clamp(received * 100 / length.Value, 0, 100));
+                    var percentage = (int)Math.Clamp(received * 100 / length.Value, 0, 100);
+                    if (percentage != lastPercentage)
+                    {
+                        lastPercentage = percentage;
+                        progress?.Report(new UpdateProgress(
+                            UpdateProgressStage.Downloading, percentage));
+                    }
                 }
             }
 
             await output.FlushAsync(cancellationToken);
             output.Close();
 
+            progress?.Report(new UpdateProgress(UpdateProgressStage.Verifying));
             var actualHash = await ComputeSha256Async(partialPath, cancellationToken);
             if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
             {
@@ -172,7 +183,6 @@ internal sealed class UpdateService : IDisposable
             }
 
             File.Move(partialPath, executablePath, overwrite: true);
-            progress?.Report(100);
             return new DownloadedUpdate(executablePath, actualHash);
         }
         catch
