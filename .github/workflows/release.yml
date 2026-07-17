@@ -26,7 +26,8 @@ jobs:
         run: |
           [xml]$project = Get-Content .\UsageTray\UsageTray.csproj
           $version = $project.Project.PropertyGroup.Version
-          if ("v$version" -ne "${{ github.ref_name }}") {
+          $acceptedTags = @("v$version", "v$version.0")
+          if ("${{ github.ref_name }}" -notin $acceptedTags) {
             throw "Tag ${{ github.ref_name }} does not match project version v$version"
           }
 

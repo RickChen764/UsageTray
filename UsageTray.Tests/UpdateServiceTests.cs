@@ -29,6 +29,34 @@ public sealed class UpdateServiceTests
     }
 
     [Theory]
+    [InlineData("1.1.2", "1.1.2.0", true)]
+    [InlineData("1.1.2.0", "1.1.2.0", true)]
+    [InlineData("1.1.2.1", "1.1.2", false)]
+    [InlineData("1.1.3", "1.1.2.0", false)]
+    public void VersionsEquivalent_NormalizesMissingRevision(
+        string left,
+        string right,
+        bool expected)
+    {
+        Assert.Equal(expected,
+            UpdateService.VersionsEquivalent(Version.Parse(left), Version.Parse(right)));
+    }
+
+    [Theory]
+    [InlineData("1.1.3.0", "1.1.3", false)]
+    [InlineData("1.1.3", "1.1.3.0", false)]
+    [InlineData("1.1.4", "1.1.3.0", true)]
+    [InlineData("1.2.0", "1.1.99.0", true)]
+    public void IsNewerVersion_UsesNormalizedSemanticOrdering(
+        string candidate,
+        string current,
+        bool expected)
+    {
+        Assert.Equal(expected,
+            UpdateService.IsNewerVersion(Version.Parse(candidate), Version.Parse(current)));
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("1234")]
     [InlineData("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")]

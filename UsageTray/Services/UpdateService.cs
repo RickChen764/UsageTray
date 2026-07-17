@@ -121,7 +121,7 @@ internal sealed class UpdateService : IDisposable
 
             var fileVersion = FileVersionInfo.GetVersionInfo(partialPath).FileVersion;
             if (!TryParseVersion(fileVersion ?? string.Empty, out var executableVersion) ||
-                executableVersion != release.Version)
+                !VersionsEquivalent(executableVersion, release.Version))
             {
                 throw new UpdateException(
                     $"更新包版本与 Release 不一致（文件 {fileVersion ?? "未知"}，Release {release.Tag}）。");
@@ -178,6 +178,18 @@ internal sealed class UpdateService : IDisposable
 
         return Version.TryParse(normalized, out version!);
     }
+
+    internal static bool VersionsEquivalent(Version left, Version right) =>
+        NormalizeVersion(left) == NormalizeVersion(right);
+
+    internal static bool IsNewerVersion(Version candidate, Version current) =>
+        NormalizeVersion(candidate) > NormalizeVersion(current);
+
+    private static Version NormalizeVersion(Version version) => new(
+        version.Major,
+        version.Minor,
+        Math.Max(0, version.Build),
+        Math.Max(0, version.Revision));
 
     internal static string ParseChecksum(string content)
     {

@@ -221,7 +221,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         try
         {
             var release = await _updateService.CheckAsync();
-            if (release is not null && release.Version > UpdateService.CurrentVersion)
+            if (release is not null &&
+                UpdateService.IsNewerVersion(release.Version, UpdateService.CurrentVersion))
             {
                 _availableUpdate = release;
                 _updateItem.Text = $"发现新版本 v{release.Version.ToString(3)}（点击更新）";
