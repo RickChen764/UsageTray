@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -51,6 +53,30 @@ jobs:
           $hash = (Get-FileHash .\UsageTray-win-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  UsageTray-win-x64.exe" | Set-Content -Encoding ascii -NoNewline .\UsageTray-win-x64.exe.sha256
 
+      - name: Prepare release notes
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $customNotes = ".\release-notes\$tag.md"
+          if (Test-Path $customNotes) {
+            Copy-Item $customNotes .\release-notes.md
+            exit 0
+          }
+
+          $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $previousTag) {
+            $subjects = @(git log "$previousTag..$tag" --pretty=format:"%s")
+          } else {
+            $subjects = @(git log -20 --pretty=format:"%s")
+          }
+
+          $notes = foreach ($subject in $subjects) {
+            $clean = $subject -replace '^(feat|fix|perf|refactor|docs|ci|build|test|chore)(\([^)]*\))?!?:\s*', ''
+            if (-not [string]::IsNullOrWhiteSpace($clean)) { "- $clean" }
+          }
+          if (-not $notes) { $notes = @('- 常规稳定性和体验改进') }
+          $notes | Set-Content -Encoding utf8 .\release-notes.md
+
       - name: Create GitHub Release
         shell: pwsh
         env:
@@ -60,4 +86,4 @@ jobs:
           .\UsageTray-win-x64.exe
           .\UsageTray-win-x64.exe.sha256
           --title "UsageTray ${{ github.ref_name }}"
-          --generate-notes
+          --notes-file .\release-notes.md

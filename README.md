@@ -20,6 +20,8 @@
 - 如果当前系统无法挂接任务栏，自动退化为普通通知区域图标
 - API Key 使用 Windows DPAPI 加密，仅当前 Windows 用户可解密
 - 后台检查 GitHub Release；发现新版本后由用户确认下载、校验、替换并自动重启
+- 专用更新窗口展示 Release Notes：清理常见 Markdown，支持独立滚动阅读
+- 更新窗口直接展示 Release Notes 详情，不提供额外跳转入口
 
 ## 使用
 
@@ -61,6 +63,8 @@ UsageTray-win-x64.exe.sha256
 ```
 
 发布新版本时更新 `UsageTray.csproj` 中的版本号并推送同名标签，例如 `v1.2.0`。GitHub Actions 会运行测试、生成自包含单文件、创建 SHA-256 校验文件并发布 Release。
+
+如需为某个版本编写详细说明，可添加 `release-notes/v版本号.md`，例如 `release-notes/v1.2.0.md`。没有专用文件时，发布流程会将两个版本标签之间的提交标题自动整理为变更清单。
 
 客户端启动后检查一次，之后每 6 小时检查。检测到新版本时只提示用户；获得确认后才会下载、校验、备份替换并自动重启。安装失败时恢复旧版本。
 GitHub API 遇到匿名限流时会自动改用公开的 Releases 重定向检查，不需要在客户端保存 GitHub Token。

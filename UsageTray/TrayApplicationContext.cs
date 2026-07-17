@@ -278,22 +278,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         try
         {
             var release = _availableUpdate;
-            var notes = string.IsNullOrWhiteSpace(release.Notes)
-                ? "该版本未提供更新说明。"
-                : release.Notes.Trim();
-            if (notes.Length > 900)
-            {
-                notes = notes[..900] + "…";
-            }
-
-            var size = release.ExecutableSize is > 0
-                ? $"\n下载大小：{FormatFileSize(release.ExecutableSize.Value)}"
-                : string.Empty;
-            var choice = MessageBox.Show(
-                $"发现新版本 v{release.Version.ToString(3)}。{size}\n\n{notes}\n\n" +
-                "下载完成后，UsageTray 会自动重启。是否立即更新？",
-                "UsageTray 更新", MessageBoxButtons.YesNo, MessageBoxIcon.Information,
-                MessageBoxDefaultButton.Button1);
+            using var prompt = new UpdatePromptForm(release);
+            var choice = prompt.ShowDialog();
             if (choice == DialogResult.Yes)
             {
                 await InstallUpdateAsync(release);
@@ -505,14 +491,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         >= 60_000m => $"{milliseconds / 60_000m:0.#} 分钟",
         >= 1_000m => $"{milliseconds / 1_000m:0.#} 秒",
         _ => $"{milliseconds:0} ms"
-    };
-
-    private static string FormatFileSize(long bytes) => bytes switch
-    {
-        >= 1024L * 1024 * 1024 => $"{bytes / (1024d * 1024 * 1024):0.##} GB",
-        >= 1024L * 1024 => $"{bytes / (1024d * 1024):0.##} MB",
-        >= 1024L => $"{bytes / 1024d:0.##} KB",
-        _ => $"{bytes} B"
     };
 
     private static string FormatCompactAmount(decimal amount, string unit)
