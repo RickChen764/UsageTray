@@ -63,3 +63,4 @@ UsageTray-win-x64.exe.sha256
 发布新版本时更新 `UsageTray.csproj` 中的版本号并推送同名标签，例如 `v1.2.0`。GitHub Actions 会运行测试、生成自包含单文件、创建 SHA-256 校验文件并发布 Release。
 
 客户端启动后检查一次，之后每 6 小时检查。检测到新版本时只提示用户；获得确认后才会下载、校验、备份替换并自动重启。安装失败时恢复旧版本。
+GitHub API 遇到匿名限流时会自动改用公开的 Releases 重定向检查，不需要在客户端保存 GitHub Token。

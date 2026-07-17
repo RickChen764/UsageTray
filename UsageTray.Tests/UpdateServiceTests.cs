@@ -102,6 +102,23 @@ public sealed class UpdateServiceTests
         Assert.Throws<UpdateException>(() => UpdateService.ParseRelease(json));
     }
 
+    [Theory]
+    [InlineData("https://github.com/RickChen764/UsageTray/releases/tag/v1.2.3", "v1.2.3")]
+    [InlineData("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.3.0", "v1.1.3.0")]
+    public void ParseTagFromReleasePage_ReadsRedirectTarget(string url, string expected)
+    {
+        Assert.Equal(expected, UpdateService.ParseTagFromReleasePage(new Uri(url)));
+    }
+
+    [Theory]
+    [InlineData("https://github.com/RickChen764/UsageTray/releases/latest")]
+    [InlineData("https://example.com/RickChen764/UsageTray/releases/tag/v1.2.3")]
+    public void ParseTagFromReleasePage_RejectsUnexpectedUrls(string url)
+    {
+        Assert.Throws<UpdateException>(() =>
+            UpdateService.ParseTagFromReleasePage(new Uri(url)));
+    }
+
     private const string ValidReleaseJson = """
         {
           "tag_name": "v1.2.0",

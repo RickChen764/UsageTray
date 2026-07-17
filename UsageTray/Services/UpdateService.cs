@@ -54,9 +54,52 @@ internal sealed class UpdateService : IDisposable
             return null;
         }
 
+        if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or
+            System.Net.HttpStatusCode.TooManyRequests)
+        {
+            return await CheckFromPublicRedirectAsync(cancellationToken);
+        }
+
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         return ParseRelease(json);
+    }
+
+    private async Task<UpdateRelease?> CheckFromPublicRedirectAsync(
+        CancellationToken cancellationToken)
+    {
+        var latestPage = new Uri(
+            $"https://github.com/{RepositoryOwner}/{RepositoryName}/releases/latest");
+        using var request = new HttpRequestMessage(HttpMethod.Get, latestPage);
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+        using var response = await _httpClient.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        var finalUri = response.RequestMessage?.RequestUri ??
+                       throw new UpdateException("无法确定 GitHub 最新版本地址。");
+        var tag = ParseTagFromReleasePage(finalUri);
+        if (!TryParseVersion(tag, out var version))
+        {
+            throw new UpdateException($"无法识别 Release 版本：{tag}");
+        }
+
+        var downloadRoot =
+            $"https://github.com/{RepositoryOwner}/{RepositoryName}/releases/latest/download/";
+        return new UpdateRelease(
+            version,
+            tag,
+            $"UsageTray {tag}",
+            "GitHub API 当前受限，请在 Release 页面查看更新说明。",
+            finalUri,
+            new Uri(downloadRoot + ExecutableAssetName),
+            new Uri(downloadRoot + ChecksumAssetName),
+            null);
     }
 
     public async Task<DownloadedUpdate> DownloadAndVerifyAsync(
@@ -202,6 +245,30 @@ internal sealed class UpdateService : IDisposable
         }
 
         return candidate.ToUpperInvariant();
+    }
+
+    internal static string ParseTagFromReleasePage(Uri uri)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps ||
+            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UpdateException("GitHub Release 页面地址无效。");
+        }
+
+        var marker = "/releases/tag/";
+        var markerIndex = uri.AbsolutePath.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            throw new UpdateException("GitHub 未返回具体的 Release 标签。");
+        }
+
+        var tag = Uri.UnescapeDataString(uri.AbsolutePath[(markerIndex + marker.Length)..]).Trim('/');
+        if (string.IsNullOrWhiteSpace(tag) || tag.Contains('/'))
+        {
+            throw new UpdateException("GitHub Release 标签无效。");
+        }
+
+        return tag;
     }
 
     private async Task<string> DownloadChecksumAsync(Uri uri, CancellationToken cancellationToken)
