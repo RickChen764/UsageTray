@@ -41,8 +41,8 @@ public sealed class HoverCardContentTests
         var normal = UsageHoverCardRenderer.Measure(content, 96);
         var highDpi = UsageHoverCardRenderer.Measure(content, 144);
 
-        Assert.Equal(420, normal.Width);
-        Assert.Equal(630, highDpi.Width);
+        Assert.Equal(450, normal.Width);
+        Assert.Equal(675, highDpi.Width);
         Assert.InRange(highDpi.Height, normal.Height * 1.5 - 1,
             normal.Height * 1.5 + 1);
     }

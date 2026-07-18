@@ -10,10 +10,10 @@
     <RootNamespace>UsageTray</RootNamespace>
     <Product>UsageTray</Product>
     <Description>在 Windows 任务栏常驻显示 API 剩余额度</Description>
-    <Version>1.1.9</Version>
-    <AssemblyVersion>1.1.9.0</AssemblyVersion>
-    <FileVersion>1.1.9.0</FileVersion>
-    <InformationalVersion>1.1.9</InformationalVersion>
+    <Version>1.1.10</Version>
+    <AssemblyVersion>1.1.10.0</AssemblyVersion>
+    <FileVersion>1.1.10.0</FileVersion>
+    <InformationalVersion>1.1.10</InformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
