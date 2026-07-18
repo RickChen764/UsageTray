@@ -4,11 +4,10 @@ namespace UsageTray;
 
 internal static class UsageHoverCardRenderer
 {
-    private const int LogicalWidth = 470;
-    private static readonly Color Background = Color.FromArgb(22, 25, 31);
+    private const int LogicalWidth = 420;
+    private static readonly Color Background = Color.FromArgb(24, 27, 33);
     private static readonly Color Surface = Color.FromArgb(31, 35, 43);
-    private static readonly Color SurfaceStrong = Color.FromArgb(38, 43, 52);
-    private static readonly Color Border = Color.FromArgb(53, 59, 70);
+    private static readonly Color Border = Color.FromArgb(54, 60, 71);
     private static readonly Color PrimaryText = Color.FromArgb(244, 246, 250);
     private static readonly Color SecondaryText = Color.FromArgb(174, 181, 193);
     private static readonly Color MutedText = Color.FromArgb(119, 128, 143);
@@ -16,44 +15,44 @@ internal static class UsageHoverCardRenderer
 
     public static Size Measure(HoverCardContent content, int dpi)
     {
-        var height = 14 + 18 + PrimaryBlockHeight(content);
+        var height = 10 + 20 + 39;
         if (!string.IsNullOrWhiteSpace(content.Message))
         {
-            height += 8 + 42;
+            height += 5 + 30;
         }
 
         if (content.Today.Count > 0)
         {
-            height += 9 + 15 + 4 + 46;
+            height += 6 + 16 + 29;
         }
 
         if (content.TokenBreakdown.Count > 0)
         {
-            height += 6 + 36;
+            height += 4 + 23;
         }
 
         if (content.Performance.Count > 0)
         {
-            height += 6 + 36;
+            height += 3 + 23;
         }
 
         if (content.AllTime.Count > 0)
         {
-            height += 9 + 15 + 4 + 38;
+            height += 6 + 16 + 25;
         }
 
         if (content.Models.Count > 0)
         {
-            height += 9 + 15 + 4 + 12 + content.Models.Count * 23;
+            height += 6 + 16 + 11 + content.Models.Count * 18;
         }
 
-        height += 8 + 1 + 7;
+        height += 6 + 1 + 5;
         if (!string.IsNullOrWhiteSpace(content.UpdatedText))
         {
-            height += 14 + 2;
+            height += 12;
         }
 
-        height += 14 + 11;
+        height += 13 + 8;
         return new Size(Scale(LogicalWidth, dpi), Scale(height, dpi));
     }
 
@@ -71,124 +70,118 @@ internal static class UsageHoverCardRenderer
         graphics.DrawRectangle(borderPen, 0, 0,
             Math.Max(0, bounds.Width - 1), Math.Max(0, bounds.Height - 1));
 
-        using var appFont = CreateFont(11, FontStyle.Bold, dpi);
-        using var badgeFont = CreateFont(10, FontStyle.Regular, dpi);
-        using var labelFont = CreateFont(10, FontStyle.Regular, dpi);
-        using var primaryFont = CreateFont(22, FontStyle.Bold, dpi);
-        using var sectionFont = CreateFont(12, FontStyle.Bold, dpi);
-        using var metricLabelFont = CreateFont(10, FontStyle.Regular, dpi);
-        using var metricValueFont = CreateFont(14, FontStyle.Bold, dpi);
-        using var bodyFont = CreateFont(12, FontStyle.Regular, dpi);
-        using var bodyBoldFont = CreateFont(12, FontStyle.Bold, dpi);
-        using var smallFont = CreateFont(10, FontStyle.Regular, dpi);
+        using var titleFont = CreateFont(11, FontStyle.Bold, dpi);
+        using var badgeFont = CreateFont(9, FontStyle.Regular, dpi);
+        using var heroFont = CreateFont(20, FontStyle.Bold, dpi);
+        using var sectionFont = CreateFont(10, FontStyle.Bold, dpi);
+        using var labelFont = CreateFont(9, FontStyle.Regular, dpi);
+        using var valueFont = CreateFont(11, FontStyle.Bold, dpi);
+        using var bodyFont = CreateFont(10, FontStyle.Regular, dpi);
+        using var bodyBoldFont = CreateFont(10, FontStyle.Bold, dpi);
+        using var smallFont = CreateFont(9, FontStyle.Regular, dpi);
 
-        var padding = Scale(14, dpi);
+        var padding = Scale(11, dpi);
         var contentWidth = bounds.Width - padding * 2;
-        var y = padding;
+        var y = Scale(10, dpi);
 
-        DrawText(graphics, content.AppName, appFont,
-            new Rectangle(padding, y, contentWidth, Scale(18, dpi)), PrimaryText);
+        DrawText(graphics, content.AppName, titleFont,
+            new Rectangle(padding, y, contentWidth, Scale(17, dpi)), PrimaryText);
         if (!string.IsNullOrWhiteSpace(content.Badge))
         {
             DrawBadge(graphics, content.Badge, badgeFont,
-                new Rectangle(padding, y, contentWidth, Scale(18, dpi)), dpi);
+                new Rectangle(padding, y, contentWidth, Scale(17, dpi)), dpi);
         }
 
         y += Scale(18, dpi);
-        DrawText(graphics, content.PrimaryLabel, labelFont,
-            new Rectangle(padding, y, contentWidth, Scale(14, dpi)), SecondaryText);
-        y += Scale(13, dpi);
-        DrawText(graphics, content.PrimaryValue, primaryFont,
-            new Rectangle(padding, y, contentWidth, Scale(28, dpi)), content.AccentColor);
-        y += Scale(27, dpi);
+        DrawText(graphics, content.PrimaryValue, heroFont,
+            new Rectangle(padding, y, contentWidth, Scale(25, dpi)), content.AccentColor);
+        y += Scale(24, dpi);
         if (!string.IsNullOrWhiteSpace(content.PrimaryCaption))
         {
             DrawText(graphics, content.PrimaryCaption, smallFont,
-                new Rectangle(padding, y, contentWidth, Scale(14, dpi)), MutedText);
-            y += Scale(14, dpi);
+                new Rectangle(padding, y, contentWidth, Scale(13, dpi)), SecondaryText);
         }
+
+        y += Scale(15, dpi);
 
         if (!string.IsNullOrWhiteSpace(content.Message))
         {
-            y += Scale(8, dpi);
-            var messageBounds = new Rectangle(
-                padding, y, contentWidth, Scale(42, dpi));
-            FillRoundedRectangle(graphics, messageBounds, Scale(7, dpi), Surface);
+            y += Scale(5, dpi);
+            var messageBounds = new Rectangle(padding, y, contentWidth, Scale(30, dpi));
+            FillRoundedRectangle(graphics, messageBounds, Scale(5, dpi), Surface);
             DrawText(graphics, content.Message, bodyFont,
-                Rectangle.Inflate(messageBounds, -Scale(11, dpi), -Scale(7, dpi)),
-                SecondaryText, TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+                Rectangle.Inflate(messageBounds, -Scale(8, dpi), -Scale(4, dpi)),
+                SecondaryText, TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix);
             y += messageBounds.Height;
         }
 
         if (content.Today.Count > 0)
         {
-            y += Scale(9, dpi);
-            DrawSectionTitle(graphics, "今日用量", "服务端统计", sectionFont,
-                smallFont, padding, y, contentWidth, dpi);
-            y += Scale(19, dpi);
-            DrawMetricTiles(graphics, content.Today, padding, y,
-                contentWidth, Scale(46, dpi), metricLabelFont, metricValueFont, dpi);
-            y += Scale(46, dpi);
+            y += Scale(6, dpi);
+            DrawSectionHeader(graphics, "今日", "服务端统计", sectionFont, smallFont,
+                padding, y, contentWidth, dpi);
+            y += Scale(16, dpi);
+            DrawMetricRow(graphics, content.Today, padding, y, contentWidth,
+                Scale(29, dpi), labelFont, valueFont, dpi, emphasizeFirst: true);
+            y += Scale(29, dpi);
         }
 
         if (content.TokenBreakdown.Count > 0)
         {
-            y += Scale(6, dpi);
-            DrawMetricStrip(graphics, "Token 构成", content.TokenBreakdown,
-                padding, y, contentWidth, metricLabelFont, bodyBoldFont, dpi);
-            y += Scale(36, dpi);
+            y += Scale(4, dpi);
+            DrawCompactStrip(graphics, "Token", content.TokenBreakdown,
+                padding, y, contentWidth, labelFont, bodyBoldFont, dpi);
+            y += Scale(23, dpi);
         }
 
         if (content.Performance.Count > 0)
         {
-            y += Scale(6, dpi);
-            DrawMetricStrip(graphics, "实时性能", content.Performance,
-                padding, y, contentWidth, metricLabelFont, bodyBoldFont, dpi);
-            y += Scale(36, dpi);
+            y += Scale(3, dpi);
+            DrawCompactStrip(graphics, "性能", content.Performance,
+                padding, y, contentWidth, labelFont, bodyBoldFont, dpi);
+            y += Scale(23, dpi);
         }
 
         if (content.AllTime.Count > 0)
         {
-            y += Scale(9, dpi);
-            DrawSectionTitle(graphics, "累计用量", null, sectionFont,
-                smallFont, padding, y, contentWidth, dpi);
-            y += Scale(19, dpi);
-            DrawSummaryStrip(graphics, content.AllTime, padding, y,
-                contentWidth, metricLabelFont, bodyBoldFont, dpi);
-            y += Scale(38, dpi);
+            y += Scale(6, dpi);
+            DrawSectionHeader(graphics, "累计", null, sectionFont, smallFont,
+                padding, y, contentWidth, dpi);
+            y += Scale(16, dpi);
+            DrawMetricRow(graphics, content.AllTime, padding, y, contentWidth,
+                Scale(25, dpi), labelFont, bodyBoldFont, dpi, emphasizeFirst: false);
+            y += Scale(25, dpi);
         }
 
         if (content.Models.Count > 0)
         {
-            y += Scale(9, dpi);
-            DrawSectionTitle(graphics, "模型消耗", "Top 3", sectionFont,
-                smallFont, padding, y, contentWidth, dpi);
-            y += Scale(19, dpi);
-            DrawModelTable(graphics, content.Models, padding, y,
-                contentWidth, smallFont, bodyFont, bodyBoldFont, dpi);
-            y += Scale(12 + content.Models.Count * 23, dpi);
+            y += Scale(6, dpi);
+            DrawSectionHeader(graphics, "模型 Top 3", null, sectionFont, smallFont,
+                padding, y, contentWidth, dpi);
+            y += Scale(16, dpi);
+            DrawModelTable(graphics, content.Models, padding, y, contentWidth,
+                smallFont, bodyFont, bodyBoldFont, dpi);
+            y += Scale(11 + content.Models.Count * 18, dpi);
         }
 
-        y += Scale(8, dpi);
+        y += Scale(6, dpi);
         using (var divider = new Pen(Border))
         {
             graphics.DrawLine(divider, padding, y, bounds.Width - padding, y);
         }
 
-        y += Scale(7, dpi);
+        y += Scale(5, dpi);
         if (!string.IsNullOrWhiteSpace(content.UpdatedText))
         {
             DrawText(graphics, content.UpdatedText, smallFont,
-                new Rectangle(padding, y, contentWidth, Scale(14, dpi)), MutedText);
-            y += Scale(16, dpi);
+                new Rectangle(padding, y, contentWidth, Scale(12, dpi)), MutedText);
+            y += Scale(12, dpi);
         }
 
         DrawText(graphics, content.HintText, smallFont,
-            new Rectangle(padding, y, contentWidth, Scale(14, dpi)), SecondaryText);
+            new Rectangle(padding, y, contentWidth, Scale(13, dpi)), SecondaryText);
     }
-
-    private static int PrimaryBlockHeight(HoverCardContent content) =>
-        string.IsNullOrWhiteSpace(content.PrimaryCaption) ? 40 : 54;
 
     private static void DrawBadge(
         Graphics graphics,
@@ -197,21 +190,20 @@ internal static class UsageHoverCardRenderer
         Rectangle rowBounds,
         int dpi)
     {
-        var horizontalPadding = Scale(8, dpi);
+        var horizontalPadding = Scale(7, dpi);
         var measured = TextRenderer.MeasureText(graphics, text, font,
-            new Size(Scale(230, dpi), rowBounds.Height),
-            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
-        var width = Math.Min(Scale(230, dpi), measured.Width + horizontalPadding * 2);
+            new Size(Scale(185, dpi), rowBounds.Height),
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding |
+            TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        var width = Math.Min(Scale(185, dpi), measured.Width + horizontalPadding * 2);
         var bounds = new Rectangle(rowBounds.Right - width, rowBounds.Top,
             width, rowBounds.Height);
-        FillRoundedRectangle(graphics, bounds, bounds.Height / 2, SurfaceStrong);
-        DrawText(graphics, text, font,
-            Rectangle.Inflate(bounds, -horizontalPadding, 0), SecondaryText,
-            TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
-            TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter);
+        FillRoundedRectangle(graphics, bounds, bounds.Height / 2, Surface);
+        DrawText(graphics, text, font, Rectangle.Inflate(bounds, -horizontalPadding, 0),
+            SecondaryText, CenteredTextFlags);
     }
 
-    private static void DrawSectionTitle(
+    private static void DrawSectionHeader(
         Graphics graphics,
         string title,
         string? caption,
@@ -223,17 +215,15 @@ internal static class UsageHoverCardRenderer
         int dpi)
     {
         DrawText(graphics, title, titleFont,
-            new Rectangle(x, y, width, Scale(15, dpi)), PrimaryText);
+            new Rectangle(x, y, width, Scale(14, dpi)), PrimaryText);
         if (!string.IsNullOrWhiteSpace(caption))
         {
             DrawText(graphics, caption, captionFont,
-                new Rectangle(x, y, width, Scale(15, dpi)), MutedText,
-                TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.Right | TextFormatFlags.NoPadding);
+                new Rectangle(x, y, width, Scale(14, dpi)), MutedText, RightTextFlags);
         }
     }
 
-    private static void DrawMetricTiles(
+    private static void DrawMetricRow(
         Graphics graphics,
         IReadOnlyList<HoverCardMetric> metrics,
         int x,
@@ -242,34 +232,34 @@ internal static class UsageHoverCardRenderer
         int height,
         Font labelFont,
         Font valueFont,
-        int dpi)
+        int dpi,
+        bool emphasizeFirst)
     {
-        var gap = Scale(7, dpi);
-        var tileWidth = (width - gap * (metrics.Count - 1)) / metrics.Count;
+        var bounds = new Rectangle(x, y, width, height);
+        FillRoundedRectangle(graphics, bounds, Scale(5, dpi), Surface);
+        var itemWidth = width / metrics.Count;
         for (var index = 0; index < metrics.Count; index++)
         {
-            var metric = metrics[index];
-            var left = x + index * (tileWidth + gap);
-            var actualWidth = index == metrics.Count - 1 ? x + width - left : tileWidth;
-            var bounds = new Rectangle(left, y, actualWidth, height);
-            FillRoundedRectangle(graphics, bounds, Scale(7, dpi),
-                metric.Emphasized ? SurfaceStrong : Surface);
-            using var outline = new Pen(metric.Emphasized
-                ? Color.FromArgb(92, 79, 53)
-                : Border);
-            DrawRoundedRectangle(graphics, bounds, Scale(7, dpi), outline);
+            var left = x + index * itemWidth;
+            var actualWidth = index == metrics.Count - 1 ? x + width - left : itemWidth;
+            if (index > 0)
+            {
+                using var divider = new Pen(Border);
+                graphics.DrawLine(divider, left, y + Scale(5, dpi),
+                    left, y + height - Scale(5, dpi));
+            }
 
-            var inner = Rectangle.Inflate(bounds, -Scale(9, dpi), -Scale(5, dpi));
-            DrawText(graphics, metric.Label, labelFont,
-                new Rectangle(inner.Left, inner.Top, inner.Width, Scale(13, dpi)), MutedText);
-            DrawText(graphics, metric.Value, valueFont,
-                new Rectangle(inner.Left, inner.Top + Scale(14, dpi),
-                    inner.Width, Scale(20, dpi)),
-                metric.Emphasized ? CostAccent : PrimaryText);
+            var labelWidth = Math.Min(Scale(43, dpi), actualWidth / 2);
+            DrawText(graphics, metrics[index].Label, labelFont,
+                new Rectangle(left + Scale(7, dpi), y, labelWidth, height), MutedText);
+            DrawText(graphics, metrics[index].Value, valueFont,
+                new Rectangle(left + labelWidth, y, actualWidth - labelWidth - Scale(7, dpi), height),
+                emphasizeFirst && index == 0 ? CostAccent : PrimaryText,
+                RightTextFlags);
         }
     }
 
-    private static void DrawMetricStrip(
+    private static void DrawCompactStrip(
         Graphics graphics,
         string title,
         IReadOnlyList<HoverCardMetric> metrics,
@@ -280,67 +270,23 @@ internal static class UsageHoverCardRenderer
         Font valueFont,
         int dpi)
     {
-        var height = Scale(36, dpi);
-        var bounds = new Rectangle(x, y, width, height);
-        FillRoundedRectangle(graphics, bounds, Scale(6, dpi), Surface);
-        var titleWidth = Scale(73, dpi);
+        var height = Scale(23, dpi);
+        var titleWidth = Scale(42, dpi);
         DrawText(graphics, title, labelFont,
-            new Rectangle(x + Scale(9, dpi), y, titleWidth - Scale(9, dpi), height),
-            SecondaryText);
-
-        var dividerX = x + titleWidth;
-        using (var divider = new Pen(Border))
-        {
-            graphics.DrawLine(divider, dividerX, y + Scale(7, dpi),
-                dividerX, y + height - Scale(7, dpi));
-        }
-
-        var metricWidth = (width - titleWidth) / metrics.Count;
+            new Rectangle(x, y, titleWidth, height), SecondaryText);
+        var valueWidth = width - titleWidth;
+        var itemWidth = valueWidth / metrics.Count;
         for (var index = 0; index < metrics.Count; index++)
         {
-            var left = dividerX + index * metricWidth;
+            var left = x + titleWidth + index * itemWidth;
             var actualWidth = index == metrics.Count - 1
                 ? x + width - left
-                : metricWidth;
+                : itemWidth;
             DrawText(graphics, metrics[index].Label, labelFont,
-                new Rectangle(left, y + Scale(3, dpi), actualWidth, Scale(13, dpi)),
-                MutedText, CenteredTextFlags);
+                new Rectangle(left, y, actualWidth, Scale(10, dpi)), MutedText,
+                CenteredTextFlags);
             DrawText(graphics, metrics[index].Value, valueFont,
-                new Rectangle(left, y + Scale(16, dpi), actualWidth, Scale(17, dpi)),
-                PrimaryText, CenteredTextFlags);
-        }
-    }
-
-    private static void DrawSummaryStrip(
-        Graphics graphics,
-        IReadOnlyList<HoverCardMetric> metrics,
-        int x,
-        int y,
-        int width,
-        Font labelFont,
-        Font valueFont,
-        int dpi)
-    {
-        var height = Scale(38, dpi);
-        var bounds = new Rectangle(x, y, width, height);
-        FillRoundedRectangle(graphics, bounds, Scale(7, dpi), Surface);
-        var metricWidth = width / metrics.Count;
-        for (var index = 0; index < metrics.Count; index++)
-        {
-            var left = x + index * metricWidth;
-            var actualWidth = index == metrics.Count - 1 ? x + width - left : metricWidth;
-            if (index > 0)
-            {
-                using var divider = new Pen(Border);
-                graphics.DrawLine(divider, left, y + Scale(7, dpi),
-                    left, y + height - Scale(7, dpi));
-            }
-
-            DrawText(graphics, metrics[index].Label, labelFont,
-                new Rectangle(left, y + Scale(3, dpi), actualWidth, Scale(13, dpi)),
-                MutedText, CenteredTextFlags);
-            DrawText(graphics, metrics[index].Value, valueFont,
-                new Rectangle(left, y + Scale(16, dpi), actualWidth, Scale(17, dpi)),
+                new Rectangle(left, y + Scale(10, dpi), actualWidth, Scale(13, dpi)),
                 PrimaryText, CenteredTextFlags);
         }
     }
@@ -356,30 +302,30 @@ internal static class UsageHoverCardRenderer
         Font bodyBoldFont,
         int dpi)
     {
-        var tokenWidth = Scale(112, dpi);
-        var costWidth = Scale(76, dpi);
+        var tokenWidth = Scale(92, dpi);
+        var costWidth = Scale(62, dpi);
         var modelWidth = width - tokenWidth - costWidth;
         DrawText(graphics, "模型", headerFont,
-            new Rectangle(x, y, modelWidth, Scale(12, dpi)), MutedText);
+            new Rectangle(x, y, modelWidth, Scale(11, dpi)), MutedText);
         DrawText(graphics, "Token", headerFont,
-            new Rectangle(x + modelWidth, y, tokenWidth, Scale(12, dpi)), MutedText,
+            new Rectangle(x + modelWidth, y, tokenWidth, Scale(11, dpi)), MutedText,
             RightTextFlags);
         DrawText(graphics, "费用", headerFont,
-            new Rectangle(x + modelWidth + tokenWidth, y, costWidth, Scale(12, dpi)),
+            new Rectangle(x + modelWidth + tokenWidth, y, costWidth, Scale(11, dpi)),
             MutedText, RightTextFlags);
-        y += Scale(12, dpi);
+        y += Scale(11, dpi);
 
         for (var index = 0; index < models.Count; index++)
         {
             var row = models[index];
-            var rowHeight = Scale(23, dpi);
+            var rowHeight = Scale(18, dpi);
             if (index % 2 == 0)
             {
                 FillRoundedRectangle(graphics,
-                    new Rectangle(x, y, width, rowHeight), Scale(4, dpi), Surface);
+                    new Rectangle(x, y, width, rowHeight), Scale(3, dpi), Surface);
             }
 
-            var inset = Scale(7, dpi);
+            var inset = Scale(5, dpi);
             DrawText(graphics, row.Model, index == 0 ? bodyBoldFont : bodyFont,
                 new Rectangle(x + inset, y, modelWidth - inset, rowHeight), PrimaryText);
             DrawText(graphics, row.Tokens, bodyFont,
@@ -401,22 +347,22 @@ internal static class UsageHoverCardRenderer
         TextFormatFlags flags = TextFormatFlags.SingleLine |
                                 TextFormatFlags.VerticalCenter |
                                 TextFormatFlags.EndEllipsis |
-                                TextFormatFlags.NoPadding) =>
+                                TextFormatFlags.NoPadding |
+                                TextFormatFlags.NoPrefix) =>
         TextRenderer.DrawText(graphics, text, font, bounds, color, flags);
 
     private static readonly TextFormatFlags CenteredTextFlags =
         TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
         TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis |
-        TextFormatFlags.NoPadding;
+        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
 
     private static readonly TextFormatFlags RightTextFlags =
         TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
         TextFormatFlags.Right | TextFormatFlags.EndEllipsis |
-        TextFormatFlags.NoPadding;
+        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
 
     private static Font CreateFont(float logicalPixels, FontStyle style, int dpi) =>
-        new("Microsoft YaHei UI", logicalPixels * dpi / 96F,
-            style, GraphicsUnit.Pixel);
+        new("Microsoft YaHei UI", logicalPixels * dpi / 96F, style, GraphicsUnit.Pixel);
 
     private static int Scale(int value, int dpi) =>
         (int)Math.Round(value * dpi / 96F, MidpointRounding.AwayFromZero);
@@ -430,18 +376,6 @@ internal static class UsageHoverCardRenderer
         using var path = RoundedRectangle(rectangle, radius);
         using var brush = new SolidBrush(color);
         graphics.FillPath(brush, path);
-    }
-
-    private static void DrawRoundedRectangle(
-        Graphics graphics,
-        Rectangle rectangle,
-        int radius,
-        Pen pen)
-    {
-        var adjusted = new Rectangle(rectangle.X, rectangle.Y,
-            Math.Max(1, rectangle.Width - 1), Math.Max(1, rectangle.Height - 1));
-        using var path = RoundedRectangle(adjusted, radius);
-        graphics.DrawPath(pen, path);
     }
 
     private static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)

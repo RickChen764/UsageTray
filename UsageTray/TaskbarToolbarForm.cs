@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using System.Text;
 using UsageTray.Services;
 
 namespace UsageTray;
@@ -18,9 +19,16 @@ internal sealed class TaskbarToolbarForm : Form
     private const int WsExNoActivate = 0x08000000;
     private const int SwpNoActivate = 0x0010;
     private const int SwpShowWindow = 0x0040;
+    private const int SwpNoSize = 0x0001;
+    private const int SwpNoZOrder = 0x0004;
+    private const int SwpNoOwnerZOrder = 0x0200;
+    private const int SwpNoSendChanging = 0x0400;
+    private const uint MonitorDefaultToNearest = 0x00000002;
     private static readonly IntPtr HwndTop = IntPtr.Zero;
+    private static readonly IntPtr HwndTopmost = new(-1);
 
     private readonly System.Windows.Forms.Timer _attachmentTimer = new() { Interval = 1500 };
+    private readonly System.Windows.Forms.Timer _toolTipPositionTimer = new() { Interval = 15 };
     private readonly ToolTip _toolTip = new();
     private IntPtr _taskbarHandle;
     private Rectangle _lastTaskbarBounds;
@@ -31,6 +39,7 @@ internal sealed class TaskbarToolbarForm : Form
         Color.FromArgb(124, 132, 145));
     private Color _statusColor = Color.FromArgb(124, 132, 145);
     private int _desiredToolbarWidth = MinimumToolbarWidth;
+    private int _toolTipPositionAttempts;
     private bool _hovered;
     private bool _pressed;
 
@@ -58,9 +67,12 @@ internal sealed class TaskbarToolbarForm : Form
         _toolTip.OwnerDraw = true;
         _toolTip.Popup += ToolTip_Popup;
         _toolTip.Draw += ToolTip_Draw;
+        _toolTip.UseAnimation = false;
+        _toolTip.UseFading = false;
         _toolTip.SetToolTip(this, "UsageTray");
 
         _attachmentTimer.Tick += (_, _) => AttachOrReposition();
+        _toolTipPositionTimer.Tick += ToolTipPositionTimer_Tick;
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -98,10 +110,10 @@ internal sealed class TaskbarToolbarForm : Form
 
     private void ToolTip_Popup(object? sender, PopupEventArgs e)
     {
-        var dpi = e.AssociatedControl?.DeviceDpi ?? DeviceDpi;
+        var dpi = GetCurrentDpi();
         var desired = UsageHoverCardRenderer.Measure(_hoverContent, dpi);
-        var workingArea = Screen.FromControl(e.AssociatedControl ?? this).WorkingArea;
         var margin = Math.Max(8, (int)Math.Round(10 * dpi / 96F));
+        var workingArea = GetMonitorWorkArea(Handle);
         e.ToolTipSize = new Size(
             Math.Min(desired.Width, Math.Max(240, workingArea.Width - margin * 2)),
             Math.Min(desired.Height, Math.Max(120, workingArea.Height - margin * 2)));
@@ -109,8 +121,137 @@ internal sealed class TaskbarToolbarForm : Form
 
     private void ToolTip_Draw(object? sender, DrawToolTipEventArgs e)
     {
-        var dpi = e.AssociatedControl?.DeviceDpi ?? DeviceDpi;
+        var dpi = GetCurrentDpi();
         UsageHoverCardRenderer.Draw(e.Graphics, e.Bounds, dpi, _hoverContent);
+        _toolTipPositionAttempts = 0;
+        _toolTipPositionTimer.Start();
+    }
+
+    private void ToolTipPositionTimer_Tick(object? sender, EventArgs e)
+    {
+        _toolTipPositionAttempts++;
+        if (KeepToolTipInsideWorkingArea(GetCurrentDpi()) ||
+            _toolTipPositionAttempts >= 20)
+        {
+            _toolTipPositionTimer.Stop();
+        }
+    }
+
+    private bool KeepToolTipInsideWorkingArea(int dpi)
+    {
+        var toolTipHandle = FindToolTipWindow();
+        if (toolTipHandle == IntPtr.Zero || !GetWindowRect(toolTipHandle, out var nativeBounds))
+        {
+            return false;
+        }
+
+        var bounds = nativeBounds.ToRectangle();
+        var monitor = GetMonitorBounds(Handle);
+        var workingArea = monitor.WorkArea;
+        var margin = Math.Max(4, (int)Math.Round(6 * dpi / 96F));
+        _ = GetWindowRect(Handle, out var nativeAnchor);
+        var anchor = nativeAnchor.ToRectangle();
+        var target = CalculateToolTipBounds(
+            bounds.Size,
+            anchor,
+            workingArea,
+            monitor.MonitorArea,
+            _lastTaskbarBounds,
+            margin);
+        var x = target.Left;
+        var y = target.Top;
+        if (x != bounds.Left || y != bounds.Top)
+        {
+            _ = SetWindowPos(toolTipHandle, HwndTopmost, x, y,
+                bounds.Width, bounds.Height,
+                SwpNoActivate | SwpNoOwnerZOrder | SwpNoSendChanging);
+        }
+
+        return true;
+    }
+
+    internal static Rectangle CalculateToolTipBounds(
+        Size toolTipSize,
+        Rectangle anchor,
+        Rectangle workArea,
+        Rectangle monitorArea,
+        Rectangle taskbarBounds,
+        int margin)
+    {
+        var horizontalTaskbar = taskbarBounds.Width >= taskbarBounds.Height;
+        int x;
+        int y;
+        if (horizontalTaskbar)
+        {
+            var taskbarAtBottom = taskbarBounds.Top + taskbarBounds.Height / 2 >=
+                                  monitorArea.Top + monitorArea.Height / 2;
+            x = anchor.Right - toolTipSize.Width;
+            y = taskbarAtBottom
+                ? workArea.Bottom - margin - toolTipSize.Height
+                : workArea.Top + margin;
+        }
+        else
+        {
+            var taskbarAtRight = taskbarBounds.Left + taskbarBounds.Width / 2 >=
+                                 monitorArea.Left + monitorArea.Width / 2;
+            x = taskbarAtRight
+                ? workArea.Right - margin - toolTipSize.Width
+                : workArea.Left + margin;
+            y = anchor.Bottom - toolTipSize.Height;
+        }
+
+        var minX = workArea.Left + margin;
+        var maxX = Math.Max(minX, workArea.Right - margin - toolTipSize.Width);
+        var minY = workArea.Top + margin;
+        var maxY = Math.Max(minY, workArea.Bottom - margin - toolTipSize.Height);
+        return new Rectangle(
+            Math.Clamp(x, minX, maxX),
+            Math.Clamp(y, minY, maxY),
+            toolTipSize.Width,
+            toolTipSize.Height);
+    }
+
+    private int GetCurrentDpi()
+    {
+        var dpi = GetDpiForWindow(Handle);
+        return dpi == 0 ? DeviceDpi : checked((int)dpi);
+    }
+
+    private static Rectangle GetMonitorWorkArea(IntPtr window) =>
+        GetMonitorBounds(window).WorkArea;
+
+    private static (Rectangle MonitorArea, Rectangle WorkArea) GetMonitorBounds(IntPtr window)
+    {
+        var monitor = MonitorFromWindow(window, MonitorDefaultToNearest);
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+        {
+            return (info.Monitor.ToRectangle(), info.Work.ToRectangle());
+        }
+
+        var fallback = Screen.FromHandle(window);
+        return (fallback.Bounds, fallback.WorkingArea);
+    }
+
+    private IntPtr FindToolTipWindow()
+    {
+        var uiThreadId = GetWindowThreadProcessId(Handle, out _);
+        IntPtr result = IntPtr.Zero;
+        _ = EnumThreadWindows(uiThreadId, (window, parameter) =>
+        {
+            var className = new StringBuilder(64);
+            _ = GetClassName(window, className, className.Capacity);
+            if (className.ToString().Contains("tooltips_class32",
+                    StringComparison.OrdinalIgnoreCase) &&
+                IsWindowVisible(window))
+            {
+                result = window;
+                return false;
+            }
+
+            return true;
+        }, IntPtr.Zero);
+        return result;
     }
 
     public void AttachOrReposition(bool force = false)
@@ -327,6 +468,8 @@ internal sealed class TaskbarToolbarForm : Form
         {
             _attachmentTimer.Stop();
             _attachmentTimer.Dispose();
+            _toolTipPositionTimer.Stop();
+            _toolTipPositionTimer.Dispose();
             _toolTip.Popup -= ToolTip_Popup;
             _toolTip.Draw -= ToolTip_Draw;
             _toolTip.Dispose();
@@ -372,6 +515,44 @@ internal sealed class TaskbarToolbarForm : Form
         public int Bottom;
 
         public Rectangle ToRectangle() => Rectangle.FromLTRB(Left, Top, Right, Bottom);
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumThreadWindows(
+        uint threadId, EnumWindowsProc callback, IntPtr parameter);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(
+        IntPtr window, StringBuilder className, int maximumCount);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr window, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public int Flags;
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
