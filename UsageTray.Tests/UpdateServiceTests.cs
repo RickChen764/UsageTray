@@ -105,6 +105,136 @@ public sealed class UpdateServiceTests
         Assert.Throws<UpdateException>(() => UpdateService.ParseRelease(json));
     }
 
+    [Fact]
+    public void ParseReleaseList_CollectsEveryStableVersionAfterCurrent()
+    {
+        const string json = """
+            [
+              {
+                "tag_name": "v1.1.10",
+                "name": "UsageTray v1.1.10",
+                "body": "最新说明",
+                "html_url": "https://github.com/RickChen764/UsageTray/releases/tag/v1.1.10",
+                "draft": false,
+                "prerelease": false,
+                "assets": [
+                  {
+                    "name": "UsageTray-win-x64.exe",
+                    "browser_download_url": "https://github.com/RickChen764/UsageTray/releases/download/v1.1.10/UsageTray-win-x64.exe",
+                    "size": 71000000
+                  },
+                  {
+                    "name": "UsageTray-win-x64.exe.sha256",
+                    "browser_download_url": "https://github.com/RickChen764/UsageTray/releases/download/v1.1.10/UsageTray-win-x64.exe.sha256",
+                    "size": 88
+                  }
+                ]
+              },
+              {
+                "tag_name": "v1.1.9",
+                "name": "UsageTray v1.1.9",
+                "body": "历史说明",
+                "html_url": "https://github.com/RickChen764/UsageTray/releases/tag/v1.1.9",
+                "draft": false,
+                "prerelease": false,
+                "assets": []
+              },
+              {
+                "tag_name": "v1.1.8-beta.1",
+                "name": "测试版本",
+                "body": "不应展示",
+                "html_url": "https://github.com/RickChen764/UsageTray/releases/tag/v1.1.8-beta.1",
+                "draft": false,
+                "prerelease": true,
+                "assets": []
+              },
+              {
+                "tag_name": "v1.1.6",
+                "name": "当前版本",
+                "body": "不应展示",
+                "html_url": "https://github.com/RickChen764/UsageTray/releases/tag/v1.1.6",
+                "draft": false,
+                "prerelease": false,
+                "assets": []
+              }
+            ]
+            """;
+
+        var release = UpdateService.ParseReleaseList(json, new Version(1, 1, 6));
+
+        Assert.NotNull(release);
+        Assert.Equal(new Version(1, 1, 10), release.Version);
+        Assert.Equal(["v1.1.10", "v1.1.9"],
+            release.Changelog.Select(entry => entry.Tag));
+        Assert.Equal("历史说明", release.Changelog[1].Notes);
+        Assert.Contains("## v1.1.10", release.Notes);
+        Assert.Contains("## v1.1.9", release.Notes);
+    }
+
+    [Fact]
+    public void ParseReleaseFeed_CollectsNotesWhenApiIsLimited()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry>
+                <link rel="alternate" href="https://github.com/RickChen764/UsageTray/releases/tag/v1.1.10" />
+                <title>UsageTray v1.1.10</title>
+                <content type="html">&lt;h2&gt;本次更新&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;放大文字&lt;/li&gt;&lt;/ul&gt;</content>
+              </entry>
+              <entry>
+                <link rel="alternate" href="https://github.com/RickChen764/UsageTray/releases/tag/v1.1.9" />
+                <title>UsageTray v1.1.9</title>
+                <content type="html">&lt;ul&gt;&lt;li&gt;修复越界&lt;/li&gt;&lt;/ul&gt;</content>
+              </entry>
+              <entry>
+                <link rel="alternate" href="https://github.com/RickChen764/UsageTray/releases/tag/v1.1.6" />
+                <title>UsageTray v1.1.6</title>
+                <content type="html">旧说明</content>
+              </entry>
+            </feed>
+            """;
+
+        var release = UpdateService.ParseReleaseFeed(xml, new Version(1, 1, 6));
+
+        Assert.NotNull(release);
+        Assert.Equal(["v1.1.10", "v1.1.9"],
+            release.Changelog.Select(entry => entry.Tag));
+        Assert.Contains("- 放大文字", release.Changelog[0].Notes);
+        Assert.Contains("## v1.1.9", release.Notes);
+        Assert.EndsWith("/releases/latest/download/UsageTray-win-x64.exe",
+            release.ExecutableUrl.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task CheckAsync_FallsBackToPublicFeedWhenApiIsRateLimited()
+    {
+        var feed = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry>
+                <link rel="alternate" href="https://github.com/RickChen764/UsageTray/releases/tag/v99.0.0" />
+                <title>UsageTray v99.0.0</title>
+                <content type="html">&lt;ul&gt;&lt;li&gt;Feed 说明&lt;/li&gt;&lt;/ul&gt;</content>
+              </entry>
+            </feed>
+            """;
+        var handler = new StubHttpMessageHandler(request =>
+            request.RequestUri!.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.Forbidden)
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(feed)
+                });
+        using var service = new UpdateService(handler);
+
+        var release = await service.CheckAsync();
+
+        Assert.NotNull(release);
+        Assert.Equal(new Version(99, 0, 0), release.Version);
+        Assert.Contains("Feed 说明", release.Notes);
+    }
+
     [Theory]
     [InlineData("https://github.com/RickChen764/UsageTray/releases/tag/v1.2.3", "v1.2.3")]
     [InlineData("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.3.0", "v1.1.3.0")]
@@ -147,8 +277,8 @@ public sealed class UpdateServiceTests
         using var service = new UpdateService(handler);
         var stages = new List<UpdateProgress>();
         var release = new UpdateRelease(
-            new Version(1, 1, 10),
-            "v1.1.10-test-progress",
+            new Version(1, 1, 11),
+            "v1.1.11-test-progress",
             "UsageTray test",
             string.Empty,
             new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.7"),

@@ -23,14 +23,27 @@ internal static class Program
         if (args.Length == 1 && string.Equals(args[0], "--preview-update-dialog", StringComparison.Ordinal))
         {
             var preview = new Models.UpdateRelease(
-                new Version(1, 1, 6),
-                "v1.1.6",
-                "UsageTray v1.1.6",
-                "## 本次更新\n\n- 修复更新说明中的 Markdown 标记和长链接排版\n- 更新窗口直接展示版本变更详情\n- 移除跳转 GitHub 的额外入口\n- 保留滚动阅读和 DPI 自适应布局",
-                new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.6"),
-                new Uri("https://github.com/RickChen764/UsageTray/releases/download/v1.1.6/UsageTray-win-x64.exe"),
-                new Uri("https://github.com/RickChen764/UsageTray/releases/download/v1.1.6/UsageTray-win-x64.exe.sha256"),
-                71_600_000);
+                new Version(1, 1, 11),
+                "v1.1.11",
+                "UsageTray v1.1.11",
+                "## 本次更新\n\n- 汇总展示多个版本的更新说明",
+                new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.11"),
+                new Uri("https://github.com/RickChen764/UsageTray/releases/download/v1.1.11/UsageTray-win-x64.exe"),
+                new Uri("https://github.com/RickChen764/UsageTray/releases/download/v1.1.11/UsageTray-win-x64.exe.sha256"),
+                71_600_000)
+            {
+                Changelog =
+                [
+                    new Models.ReleaseNoteEntry(
+                        new Version(1, 1, 11), "v1.1.11", "UsageTray v1.1.11",
+                        "## 本次更新\n\n- 汇总当前版本之后的所有更新说明\n- 增加 GitHub 完整日志入口",
+                        new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.11")),
+                    new Models.ReleaseNoteEntry(
+                        new Version(1, 1, 10), "v1.1.10", "UsageTray v1.1.10",
+                        "## 本次更新\n\n- 放大 Hover 字体和面板",
+                        new Uri("https://github.com/RickChen764/UsageTray/releases/tag/v1.1.10"))
+                ]
+            };
             Application.Run(new UpdatePromptForm(preview));
             return;
         }

@@ -8,4 +8,14 @@ internal sealed record UpdateRelease(
     Uri PageUrl,
     Uri ExecutableUrl,
     Uri ChecksumUrl,
-    long? ExecutableSize);
+    long? ExecutableSize)
+{
+    public IReadOnlyList<ReleaseNoteEntry> Changelog { get; init; } = [];
+}
+
+internal sealed record ReleaseNoteEntry(
+    Version Version,
+    string Tag,
+    string Name,
+    string Notes,
+    Uri PageUrl);

@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Xml;
+using System.Xml.Linq;
 using UsageTray.Models;
 
 namespace UsageTray.Services;
@@ -48,7 +50,7 @@ internal sealed class UpdateService : IDisposable
     public async Task<UpdateRelease?> CheckAsync(CancellationToken cancellationToken = default)
     {
         var endpoint = new Uri(
-            $"https://api.github.com/repos/{RepositoryOwner}/{RepositoryName}/releases/latest");
+            $"https://api.github.com/repos/{RepositoryOwner}/{RepositoryName}/releases?per_page=100");
         using var response = await _httpClient.GetAsync(endpoint, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -58,49 +60,36 @@ internal sealed class UpdateService : IDisposable
         if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or
             System.Net.HttpStatusCode.TooManyRequests)
         {
-            return await CheckFromPublicRedirectAsync(cancellationToken);
+            return await CheckFromPublicFeedAsync(cancellationToken);
         }
 
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        return ParseRelease(json);
+        return ParseReleaseList(json, CurrentVersion);
     }
 
-    private async Task<UpdateRelease?> CheckFromPublicRedirectAsync(
+    private async Task<UpdateRelease?> CheckFromPublicFeedAsync(
         CancellationToken cancellationToken)
     {
-        var latestPage = new Uri(
-            $"https://github.com/{RepositoryOwner}/{RepositoryName}/releases/latest");
-        using var request = new HttpRequestMessage(HttpMethod.Get, latestPage);
+        var feedUrl = new Uri(
+            $"https://github.com/{RepositoryOwner}/{RepositoryName}/releases.atom");
+        using var request = new HttpRequestMessage(HttpMethod.Get, feedUrl);
         request.Headers.Accept.Clear();
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
-        using var response = await _httpClient.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/atom+xml"));
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return null;
         }
 
         response.EnsureSuccessStatusCode();
-        var finalUri = response.RequestMessage?.RequestUri ??
-                       throw new UpdateException("无法确定 GitHub 最新版本地址。");
-        var tag = ParseTagFromReleasePage(finalUri);
-        if (!TryParseVersion(tag, out var version))
+        if (response.Content.Headers.ContentLength is > 2 * 1024 * 1024)
         {
-            throw new UpdateException($"无法识别 Release 版本：{tag}");
+            throw new UpdateException("GitHub Release Feed 尺寸异常。");
         }
 
-        var downloadRoot =
-            $"https://github.com/{RepositoryOwner}/{RepositoryName}/releases/latest/download/";
-        return new UpdateRelease(
-            version,
-            tag,
-            $"UsageTray {tag}",
-            "GitHub API 当前受限，请在 Release 页面查看更新说明。",
-            finalUri,
-            new Uri(downloadRoot + ExecutableAssetName),
-            new Uri(downloadRoot + ChecksumAssetName),
-            null);
+        var feed = await response.Content.ReadAsStringAsync(cancellationToken);
+        return ParseReleaseFeed(feed, CurrentVersion);
     }
 
     public async Task<DownloadedUpdate> DownloadAndVerifyAsync(
@@ -195,7 +184,157 @@ internal sealed class UpdateService : IDisposable
     internal static UpdateRelease ParseRelease(string json)
     {
         using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
+        var release = ParseInstallableRelease(document.RootElement);
+        return release with
+        {
+            Changelog =
+            [
+                new ReleaseNoteEntry(
+                    release.Version,
+                    release.Tag,
+                    release.Name,
+                    release.Notes,
+                    release.PageUrl)
+            ]
+        };
+    }
+
+    internal static UpdateRelease? ParseReleaseList(string json, Version currentVersion)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new UpdateException("GitHub Release 列表格式无效。");
+        }
+
+        var candidates = new List<(Version Version, JsonElement Element)>();
+        foreach (var element in document.RootElement.EnumerateArray())
+        {
+            if (ReadBoolean(element, "draft") || ReadBoolean(element, "prerelease") ||
+                !element.TryGetProperty("tag_name", out var tagElement) ||
+                !TryParseVersion(tagElement.GetString() ?? string.Empty, out var version) ||
+                !IsNewerVersion(version, currentVersion))
+            {
+                continue;
+            }
+
+            candidates.Add((version, element.Clone()));
+        }
+
+        var ordered = candidates
+            .GroupBy(candidate => NormalizeVersion(candidate.Version))
+            .Select(group => group.First())
+            .OrderByDescending(candidate => NormalizeVersion(candidate.Version))
+            .ToArray();
+        if (ordered.Length == 0)
+        {
+            return null;
+        }
+
+        var latest = ParseInstallableRelease(ordered[0].Element);
+        var changelog = ordered
+            .Select(candidate => ParseReleaseNote(candidate.Element, candidate.Version))
+            .ToArray();
+        return latest with
+        {
+            Notes = ReleaseNotesFormatter.CombineMarkdown(changelog, latest.Notes),
+            Changelog = changelog
+        };
+    }
+
+    internal static UpdateRelease? ParseReleaseFeed(string xml, Version currentVersion)
+    {
+        XDocument document;
+        try
+        {
+            var settings = new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null
+            };
+            using var stringReader = new StringReader(xml);
+            using var reader = XmlReader.Create(stringReader, settings);
+            document = XDocument.Load(reader);
+        }
+        catch (Exception ex) when (ex is XmlException or InvalidOperationException)
+        {
+            throw new UpdateException("GitHub Release Feed 格式无效。", ex);
+        }
+
+        XNamespace atom = "http://www.w3.org/2005/Atom";
+        var notes = new List<ReleaseNoteEntry>();
+        foreach (var entry in document.Root?.Elements(atom + "entry") ?? [])
+        {
+            var pageValue = entry.Elements(atom + "link")
+                .FirstOrDefault(link =>
+                    string.Equals((string?)link.Attribute("rel"), "alternate",
+                        StringComparison.OrdinalIgnoreCase))?
+                .Attribute("href")?.Value;
+            if (!Uri.TryCreate(pageValue, UriKind.Absolute, out var pageUrl))
+            {
+                continue;
+            }
+
+            string tag;
+            try
+            {
+                tag = ParseTagFromReleasePage(pageUrl);
+            }
+            catch (UpdateException)
+            {
+                continue;
+            }
+
+            if (!TryParseVersion(tag, out var version) ||
+                IsPrereleaseTag(tag) ||
+                !IsNewerVersion(version, currentVersion))
+            {
+                continue;
+            }
+
+            var title = entry.Element(atom + "title")?.Value?.Trim();
+            var html = entry.Element(atom + "content")?.Value;
+            notes.Add(new ReleaseNoteEntry(
+                version,
+                tag,
+                string.IsNullOrWhiteSpace(title) ? $"UsageTray {tag}" : title,
+                ReleaseNotesFormatter.FromGitHubHtml(html),
+                pageUrl));
+        }
+
+        var ordered = notes
+            .GroupBy(note => NormalizeVersion(note.Version))
+            .Select(group => group.First())
+            .OrderByDescending(note => NormalizeVersion(note.Version))
+            .ToArray();
+        if (ordered.Length == 0)
+        {
+            return null;
+        }
+
+        var latest = ordered[0];
+        var downloadRoot =
+            $"https://github.com/{RepositoryOwner}/{RepositoryName}/releases/latest/download/";
+        var release = new UpdateRelease(
+            latest.Version,
+            latest.Tag,
+            latest.Name,
+            latest.Notes,
+            latest.PageUrl,
+            new Uri(downloadRoot + ExecutableAssetName),
+            new Uri(downloadRoot + ChecksumAssetName),
+            null)
+        {
+            Changelog = ordered
+        };
+        return release with
+        {
+            Notes = ReleaseNotesFormatter.CombineMarkdown(ordered, latest.Notes)
+        };
+    }
+
+    private static UpdateRelease ParseInstallableRelease(JsonElement root)
+    {
         var tag = root.GetProperty("tag_name").GetString() ??
                   throw new UpdateException("Release 缺少版本标签。");
         if (!TryParseVersion(tag, out var version))
@@ -221,6 +360,24 @@ internal sealed class UpdateService : IDisposable
                 : null);
     }
 
+    private static ReleaseNoteEntry ParseReleaseNote(JsonElement root, Version version)
+    {
+        var tag = root.GetProperty("tag_name").GetString() ?? version.ToString(3);
+        var name = root.TryGetProperty("name", out var nameElement)
+            ? nameElement.GetString() ?? tag
+            : tag;
+        var notes = root.TryGetProperty("body", out var bodyElement)
+            ? bodyElement.GetString() ?? string.Empty
+            : string.Empty;
+        var pageUrl = ReadHttpsUri(
+            root.GetProperty("html_url").GetString(), "Release 页面");
+        return new ReleaseNoteEntry(version, tag, name, notes, pageUrl);
+    }
+
+    private static bool ReadBoolean(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) &&
+        value.ValueKind == JsonValueKind.True;
+
     internal static bool TryParseVersion(string value, out Version version)
     {
         var normalized = value.Trim().TrimStart('v', 'V');
@@ -231,6 +388,12 @@ internal sealed class UpdateService : IDisposable
         }
 
         return Version.TryParse(normalized, out version!);
+    }
+
+    private static bool IsPrereleaseTag(string tag)
+    {
+        var normalized = tag.Trim().TrimStart('v', 'V');
+        return normalized.Contains('-', StringComparison.Ordinal);
     }
 
     internal static bool VersionsEquivalent(Version left, Version right) =>
@@ -358,6 +521,11 @@ internal sealed record DownloadedUpdate(string ExecutablePath, string Sha256);
 internal sealed class UpdateException : Exception
 {
     public UpdateException(string message) : base(message)
+    {
+    }
+
+    public UpdateException(string message, Exception innerException)
+        : base(message, innerException)
     {
     }
 }

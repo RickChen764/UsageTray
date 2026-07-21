@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UsageTray.Models;
 using UsageTray.Services;
 
@@ -74,14 +75,35 @@ internal sealed class UpdatePromptForm : Form
         };
         root.Controls.Add(metadata, 1, 1);
 
+        var notesHeader = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            Margin = new Padding(0, 0, 0, 7)
+        };
+        notesHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        notesHeader.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var changelogCount = release.Changelog.Count > 0 ? release.Changelog.Count : 1;
         var notesLabel = new Label
         {
             AutoSize = true,
-            Text = "更新说明",
+            Text = changelogCount > 1 ? $"更新内容（{changelogCount} 个版本）" : "更新内容",
             Font = new Font(Font, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 7)
+            Margin = new Padding(0)
         };
-        root.Controls.Add(notesLabel, 1, 2);
+        var githubLink = new LinkLabel
+        {
+            AutoSize = true,
+            Text = "GitHub 完整日志 ↗",
+            Margin = new Padding(12, 0, 0, 0),
+            TabStop = true
+        };
+        githubLink.LinkClicked += (_, _) => OpenGitHubChangelog();
+        notesHeader.Controls.Add(notesLabel, 0, 0);
+        notesHeader.Controls.Add(githubLink, 1, 0);
+        root.Controls.Add(notesHeader, 1, 2);
 
         _notesTextBox.Dock = DockStyle.Fill;
         _notesTextBox.ReadOnly = true;
@@ -90,7 +112,7 @@ internal sealed class UpdatePromptForm : Form
         _notesTextBox.ScrollBars = RichTextBoxScrollBars.Vertical;
         _notesTextBox.BackColor = SystemColors.Window;
         _notesTextBox.BorderStyle = BorderStyle.FixedSingle;
-        _notesTextBox.Text = ReleaseNotesFormatter.ToPlainText(release.Notes);
+        _notesTextBox.Text = ReleaseNotesFormatter.Combine(release.Changelog, release.Notes);
         _notesTextBox.Margin = new Padding(0, 0, 0, 12);
         root.Controls.Add(_notesTextBox, 1, 3);
 
@@ -150,4 +172,20 @@ internal sealed class UpdatePromptForm : Form
         >= 1024L => $"{bytes / 1024d:0.##} KB",
         _ => $"{bytes} B"
     };
+
+    private void OpenGitHubChangelog()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(UpdateService.ReleasesPage.AbsoluteUri)
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"无法打开 GitHub。\n\n{ex.Message}",
+                "UsageTray 更新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
 }
