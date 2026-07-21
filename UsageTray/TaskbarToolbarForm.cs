@@ -21,15 +21,15 @@ internal sealed class TaskbarToolbarForm : Form
     private const int SwpShowWindow = 0x0040;
     private const int SwpNoSize = 0x0001;
     private const int SwpNoZOrder = 0x0004;
-    private const int SwpNoOwnerZOrder = 0x0200;
-    private const int SwpNoSendChanging = 0x0400;
+    private const int SwpNoMove = 0x0002;
+    private const int SwpHideWindow = 0x0080;
+    private const int WmWindowPosChanging = 0x0046;
     private const uint MonitorDefaultToNearest = 0x00000002;
     private static readonly IntPtr HwndTop = IntPtr.Zero;
-    private static readonly IntPtr HwndTopmost = new(-1);
 
     private readonly System.Windows.Forms.Timer _attachmentTimer = new() { Interval = 1500 };
-    private readonly System.Windows.Forms.Timer _toolTipPositionTimer = new() { Interval = 15 };
     private readonly ToolTip _toolTip = new();
+    private readonly ToolTipWindowSubclass _toolTipWindowSubclass;
     private IntPtr _taskbarHandle;
     private Rectangle _lastTaskbarBounds;
     private Rectangle _lastTrayBounds;
@@ -39,7 +39,9 @@ internal sealed class TaskbarToolbarForm : Form
         Color.FromArgb(124, 132, 145));
     private Color _statusColor = Color.FromArgb(124, 132, 145);
     private int _desiredToolbarWidth = MinimumToolbarWidth;
-    private int _toolTipPositionAttempts;
+    private int _pendingToolTipWidth;
+    private int _pendingToolTipHeight;
+    private bool _toolTipPositionArmed;
     private bool _hovered;
     private bool _pressed;
 
@@ -51,6 +53,7 @@ internal sealed class TaskbarToolbarForm : Form
 
     public TaskbarToolbarForm(ContextMenuStrip contextMenu)
     {
+        _toolTipWindowSubclass = new ToolTipWindowSubclass(this);
         FormBorderStyle = FormBorderStyle.None;
         AutoScaleMode = AutoScaleMode.None;
         ShowInTaskbar = false;
@@ -72,7 +75,6 @@ internal sealed class TaskbarToolbarForm : Form
         _toolTip.SetToolTip(this, "UsageTray");
 
         _attachmentTimer.Tick += (_, _) => AttachOrReposition();
-        _toolTipPositionTimer.Tick += ToolTipPositionTimer_Tick;
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -91,6 +93,9 @@ internal sealed class TaskbarToolbarForm : Form
     {
         base.OnShown(e);
         AttachOrReposition(force: true);
+        // 提前接管原生 ToolTip 窗口，确保第一次 Hover 的首个
+        // WM_WINDOWPOSCHANGING 就能被修正，不需要等 Popup/Draw 后再移动。
+        EnsureToolTipSubclass();
         _attachmentTimer.Start();
     }
 
@@ -114,60 +119,51 @@ internal sealed class TaskbarToolbarForm : Form
         var desired = UsageHoverCardRenderer.Measure(_hoverContent, dpi);
         var margin = Math.Max(8, (int)Math.Round(10 * dpi / 96F));
         var workingArea = GetMonitorWorkArea(Handle);
-        e.ToolTipSize = new Size(
-            Math.Min(desired.Width, Math.Max(240, workingArea.Width - margin * 2)),
-            Math.Min(desired.Height, Math.Max(120, workingArea.Height - margin * 2)));
+        _pendingToolTipWidth = Math.Min(
+            desired.Width, Math.Max(240, workingArea.Width - margin * 2));
+        _pendingToolTipHeight = Math.Min(
+            desired.Height, Math.Max(120, workingArea.Height - margin * 2));
+        e.ToolTipSize = new Size(_pendingToolTipWidth, _pendingToolTipHeight);
+        _toolTipPositionArmed = true;
+        EnsureToolTipSubclass();
     }
 
     private void ToolTip_Draw(object? sender, DrawToolTipEventArgs e)
     {
         var dpi = GetCurrentDpi();
         UsageHoverCardRenderer.Draw(e.Graphics, e.Bounds, dpi, _hoverContent);
-        _toolTipPositionAttempts = 0;
-        _toolTipPositionTimer.Start();
+        EnsureToolTipSubclass();
     }
 
-    private void ToolTipPositionTimer_Tick(object? sender, EventArgs e)
+    private void EnsureToolTipSubclass()
     {
-        _toolTipPositionAttempts++;
-        if (KeepToolTipInsideWorkingArea(GetCurrentDpi()) ||
-            _toolTipPositionAttempts >= 20)
+        if (_toolTipWindowSubclass.Handle != IntPtr.Zero)
         {
-            _toolTipPositionTimer.Stop();
+            return;
+        }
+
+        var toolTipHandle = FindToolTipWindow(requireVisible: false);
+        if (toolTipHandle != IntPtr.Zero)
+        {
+            _toolTipWindowSubclass.Attach(toolTipHandle);
         }
     }
 
-    private bool KeepToolTipInsideWorkingArea(int dpi)
+    private Rectangle CalculateCurrentToolTipBounds(Size toolTipSize)
     {
-        var toolTipHandle = FindToolTipWindow();
-        if (toolTipHandle == IntPtr.Zero || !GetWindowRect(toolTipHandle, out var nativeBounds))
-        {
-            return false;
-        }
-
-        var bounds = nativeBounds.ToRectangle();
+        var dpi = GetCurrentDpi();
         var monitor = GetMonitorBounds(Handle);
         var workingArea = monitor.WorkArea;
         var margin = Math.Max(4, (int)Math.Round(6 * dpi / 96F));
         _ = GetWindowRect(Handle, out var nativeAnchor);
         var anchor = nativeAnchor.ToRectangle();
-        var target = CalculateToolTipBounds(
-            bounds.Size,
+        return CalculateToolTipBounds(
+            toolTipSize,
             anchor,
             workingArea,
             monitor.MonitorArea,
             _lastTaskbarBounds,
             margin);
-        var x = target.Left;
-        var y = target.Top;
-        if (x != bounds.Left || y != bounds.Top)
-        {
-            _ = SetWindowPos(toolTipHandle, HwndTopmost, x, y,
-                bounds.Width, bounds.Height,
-                SwpNoActivate | SwpNoOwnerZOrder | SwpNoSendChanging);
-        }
-
-        return true;
     }
 
     internal static Rectangle CalculateToolTipBounds(
@@ -233,7 +229,7 @@ internal sealed class TaskbarToolbarForm : Form
         return (fallback.Bounds, fallback.WorkingArea);
     }
 
-    private IntPtr FindToolTipWindow()
+    private IntPtr FindToolTipWindow(bool requireVisible)
     {
         var uiThreadId = GetWindowThreadProcessId(Handle, out _);
         IntPtr result = IntPtr.Zero;
@@ -243,7 +239,7 @@ internal sealed class TaskbarToolbarForm : Form
             _ = GetClassName(window, className, className.Capacity);
             if (className.ToString().Contains("tooltips_class32",
                     StringComparison.OrdinalIgnoreCase) &&
-                IsWindowVisible(window))
+                (!requireVisible || IsWindowVisible(window)))
             {
                 result = window;
                 return false;
@@ -427,6 +423,7 @@ internal sealed class TaskbarToolbarForm : Form
 
     protected override void OnMouseLeave(EventArgs e)
     {
+        _toolTipPositionArmed = false;
         _hovered = false;
         _pressed = false;
         Invalidate();
@@ -468,8 +465,7 @@ internal sealed class TaskbarToolbarForm : Form
         {
             _attachmentTimer.Stop();
             _attachmentTimer.Dispose();
-            _toolTipPositionTimer.Stop();
-            _toolTipPositionTimer.Dispose();
+            _toolTipWindowSubclass.Dispose();
             _toolTip.Popup -= ToolTip_Popup;
             _toolTip.Draw -= ToolTip_Draw;
             _toolTip.Dispose();
@@ -488,6 +484,100 @@ internal sealed class TaskbarToolbarForm : Form
         path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPosition
+    {
+        public IntPtr Window;
+        public IntPtr InsertAfter;
+        public int X;
+        public int Y;
+        public int Width;
+        public int Height;
+        public uint Flags;
+    }
+
+    private sealed class ToolTipWindowSubclass(TaskbarToolbarForm owner)
+        : NativeWindow, IDisposable
+    {
+        public void Attach(IntPtr window)
+        {
+            if (Handle == window)
+            {
+                return;
+            }
+
+            if (Handle != IntPtr.Zero)
+            {
+                ReleaseHandle();
+            }
+
+            AssignHandle(window);
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmWindowPosChanging && message.LParam != IntPtr.Zero)
+            {
+                try
+                {
+                    var position = Marshal.PtrToStructure<WindowPosition>(message.LParam);
+                    if (!owner._toolTipPositionArmed ||
+                        (position.Flags & SwpHideWindow) != 0)
+                    {
+                        return;
+                    }
+
+                    var currentSize = GetCurrentSize();
+                    var width = (position.Flags & SwpNoSize) == 0 && position.Width > 0
+                        ? position.Width
+                        : owner._pendingToolTipWidth > 0
+                            ? owner._pendingToolTipWidth
+                            : currentSize.Width;
+                    var height = (position.Flags & SwpNoSize) == 0 && position.Height > 0
+                        ? position.Height
+                        : owner._pendingToolTipHeight > 0
+                            ? owner._pendingToolTipHeight
+                            : currentSize.Height;
+                    if (width > 0 && height > 0)
+                    {
+                        var target = owner.CalculateCurrentToolTipBounds(new Size(width, height));
+                        position.X = target.X;
+                        position.Y = target.Y;
+                        position.Flags &= ~(uint)SwpNoMove;
+                        Marshal.StructureToPtr(position, message.LParam, fDeleteOld: false);
+                    }
+                }
+                catch
+                {
+                    // 绝不允许托管异常穿过原生窗口过程。
+                }
+
+                // 坐标必须在原生窗口过程执行前写回；否则系统会先按默认
+                // 位置绘制一帧，之后再纠正就会产生肉眼可见的闪跳。
+                base.WndProc(ref message);
+                return;
+            }
+
+            base.WndProc(ref message);
+        }
+
+        private Size GetCurrentSize()
+        {
+            return Handle != IntPtr.Zero &&
+                   GetWindowRect(Handle, out var bounds)
+                ? bounds.ToRectangle().Size
+                : Size.Empty;
+        }
+
+        public void Dispose()
+        {
+            if (Handle != IntPtr.Zero)
+            {
+                ReleaseHandle();
+            }
+        }
     }
 
     private void ApplyRoundedWindowRegion(int width, int height)
